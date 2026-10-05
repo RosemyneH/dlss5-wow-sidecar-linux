@@ -1,3 +1,4 @@
+mod diagnostics;
 mod i18n;
 mod themes;
 
@@ -6,8 +7,10 @@ use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use diagnostics::{BackendKind, CaptureState, StallTracker};
 use eframe::egui;
 use i18n::{tr, Msg};
+use sidecar_capture::{capture_doctor_report, CaptureDoctorLevel, CaptureDoctorLine};
 use sidecar_config::{
     apply_preset, default_config_path, load_config, matching_preset, neural_strength_of,
     reset_rendering_settings, save_config, sidecar_dir, Config, NeuralStrength, PRESETS,
@@ -110,6 +113,9 @@ struct ManagerApp {
     log_lines: Vec<String>,
     installs: Vec<WowInstall>,
     probes: Vec<ProbeResult>,
+    capture_doctor: Vec<CaptureDoctorLine>,
+    stall: StallTracker,
+    capture_state: CaptureState,
     scan_busy: bool,
     scan_rx: Option<Receiver<Vec<WowInstall>>>,
     status_message: String,
@@ -134,6 +140,9 @@ impl ManagerApp {
             log_lines: Vec::new(),
             installs: Vec::new(),
             probes: Vec::new(),
+            capture_doctor: Vec::new(),
+            stall: StallTracker::new(Instant::now()),
+            capture_state: CaptureState::Stopped,
             scan_busy: false,
             scan_rx: None,
             status_message: String::new(),
@@ -148,7 +157,31 @@ impl ManagerApp {
             app.log(format!("config warning: {w}"));
         }
         app.refresh_probes();
+        app.update_capture_state();
         app
+    }
+
+    fn update_capture_state(&mut self) {
+        let status = self.live.status.as_ref();
+        let stalled = self
+            .stall
+            .observe(status.map(|s| s.sequence), Instant::now());
+        let next = CaptureState::from_live(self.live.overlay_running, status, stalled);
+        if std::mem::discriminant(&next) != std::mem::discriminant(&self.capture_state) {
+            self.log(format!("capture: {}", next.summary()));
+        }
+        self.capture_state = next;
+    }
+
+    fn live_backend(&self) -> Option<BackendKind> {
+        self.live
+            .status
+            .as_ref()
+            .map(|s| BackendKind::from_id(&s.pass_name))
+    }
+
+    fn configured_backend(&self) -> BackendKind {
+        BackendKind::from_id(processor_id_for_config(&self.saved_snapshot))
     }
 
     fn log(&mut self, line: impl Into<String>) {
@@ -165,6 +198,7 @@ impl ManagerApp {
 
     fn refresh_probes(&mut self) {
         self.probes = run_all_probes(&sidecar_dir(), &self.wow_dir_path());
+        self.capture_doctor = capture_doctor_report();
     }
 
     fn refresh_setup(&mut self) {
@@ -176,6 +210,7 @@ impl ManagerApp {
         if self.last_live_poll.elapsed() >= Duration::from_secs(1) {
             self.live = poll_live_state();
             self.last_live_poll = Instant::now();
+            self.update_capture_state();
         }
     }
 
@@ -441,12 +476,10 @@ impl ManagerApp {
                 ));
             }
             ui.label(format!(
-                "Variant: {} | pass: {}",
-                s.runtime_variant, s.pass_name
+                "Variant: {} | frames: {} | drops: {}",
+                s.runtime_variant, s.frames, s.drops
             ));
-            if !s.last_error.is_empty() {
-                ui.colored_label(egui::Color32::LIGHT_RED, &s.last_error);
-            }
+            self.draw_backend_and_capture(ui);
 
             ui.add_space(8.0);
             let visible = s.overlay_visible != 0;
@@ -491,8 +524,10 @@ impl ManagerApp {
             }
         } else if self.live.overlay_running {
             ui.label("Overlay is running but status is not available yet.");
+            self.draw_backend_and_capture(ui);
         } else {
             ui.label("Start the overlay to see live FPS and latency.");
+            self.draw_backend_and_capture(ui);
         }
 
         ui.add_space(12.0);
@@ -525,6 +560,44 @@ impl ManagerApp {
         } else {
             ui.colored_label(egui::Color32::LIGHT_GREEN, "No blocking check failures.");
         }
+    }
+
+    fn draw_backend_and_capture(&self, ui: &mut egui::Ui) {
+        let configured = self.configured_backend();
+        ui.horizontal(|ui| {
+            ui.label("Neural backend:");
+            match self.live_backend() {
+                Some(live) if live != BackendKind::Idle => {
+                    ui.strong(live.label());
+                    if live != configured {
+                        ui.colored_label(
+                            Self::probe_color(ProbeState::Warn),
+                            format!("(saved config: {})", configured.label()),
+                        );
+                    }
+                }
+                _ => {
+                    ui.strong(configured.label());
+                    ui.label(egui::RichText::new("(from saved config)").weak());
+                }
+            }
+        });
+        if self.dirty
+            && processor_id_for_config(&self.config)
+                != processor_id_for_config(&self.saved_snapshot)
+        {
+            ui.colored_label(
+                Self::probe_color(ProbeState::Warn),
+                "Unsaved backend change — save to apply.",
+            );
+        }
+        ui.horizontal(|ui| {
+            ui.label("Capture:");
+            ui.colored_label(
+                Self::probe_color(self.capture_state.level()),
+                self.capture_state.summary(),
+            );
+        });
     }
 
     fn draw_setup(&mut self, ui: &mut egui::Ui) {
@@ -739,6 +812,31 @@ impl ManagerApp {
                             );
                         }
                     });
+                    ui.end_row();
+                }
+            });
+
+        ui.add_space(12.0);
+        ui.separator();
+        ui.strong("Runtime");
+        self.draw_backend_and_capture(ui);
+
+        ui.add_space(12.0);
+        ui.strong("Capture readiness (portal)");
+        egui::Grid::new("capture_doctor_grid")
+            .num_columns(3)
+            .spacing([12.0, 6.0])
+            .striped(true)
+            .show(ui, |ui| {
+                for line in &self.capture_doctor {
+                    let state = match line.level {
+                        CaptureDoctorLevel::Ok => ProbeState::Ok,
+                        CaptureDoctorLevel::Warn => ProbeState::Warn,
+                        CaptureDoctorLevel::Fail => ProbeState::Fail,
+                    };
+                    ui.colored_label(Self::probe_color(state), Self::probe_state_label(state));
+                    ui.label(&line.label);
+                    ui.label(&line.detail);
                     ui.end_row();
                 }
             });

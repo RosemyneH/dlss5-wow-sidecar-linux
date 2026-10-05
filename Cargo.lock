@@ -4748,6 +4748,7 @@ dependencies = [
  "eframe",
  "egui",
  "rfd",
+ "sidecar-capture",
  "sidecar-config",
  "sidecar-core",
  "sidecar-install",
