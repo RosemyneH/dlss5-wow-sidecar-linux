@@ -1,6 +1,14 @@
 [workspace]
 resolver = "2"
-members = ["crates/sidecar-core", "crates/sidecar-cli", "crates/sidecar-probes"]
+members = [
+    "crates/sidecar-config",
+    "crates/sidecar-core",
+    "crates/sidecar-cli",
+    "crates/sidecar-install",
+    "crates/sidecar-neural",
+    "crates/sidecar-probes",
+    "crates/sidecar-overlay",
+]
 
 [workspace.package]
 version = "0.1.0"
@@ -16,3 +24,4 @@ serde_json = "1"
 thiserror = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+toml = "0.8"

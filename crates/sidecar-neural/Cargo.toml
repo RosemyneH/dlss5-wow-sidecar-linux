@@ -1,0 +1,11 @@
+[package]
+name = "sidecar-neural"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Frame processors (shader MVP + future ONNX) for wowsidecar-linux"
+
+[dependencies]
+thiserror.workspace = true
+
+[dev-dependencies]
