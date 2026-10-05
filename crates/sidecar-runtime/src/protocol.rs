@@ -9,7 +9,6 @@ pub enum SidecarCommand {
     HideOverlay = 3,
     ShowHud = 4,
     HideHud = 5,
-    Panic = 6,
 }
 
 impl SidecarCommand {
@@ -21,7 +20,6 @@ impl SidecarCommand {
             3 => Some(Self::HideOverlay),
             4 => Some(Self::ShowHud),
             5 => Some(Self::HideHud),
-            6 => Some(Self::Panic),
             _ => None,
         }
     }

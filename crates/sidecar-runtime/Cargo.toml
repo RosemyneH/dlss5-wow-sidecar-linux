@@ -20,12 +20,6 @@ hotkeys-evdev = ["dep:evdev"]
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-sidecar-capture = { path = "../sidecar-capture" }
-sidecar-config = { path = "../sidecar-config" }
-sidecar-core = { path = "../sidecar-core" }
-sidecar-neural = { path = "../sidecar-neural" }
-sidecar-overlay = { path = "../sidecar-overlay" }
-sidecar-probes = { path = "../sidecar-probes" }
 thiserror.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true

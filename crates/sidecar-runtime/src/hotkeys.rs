@@ -15,14 +15,14 @@ use std::sync::{Arc, Mutex};
 
 use tracing::warn;
 
-use crate::protocol::SidecarCommand;
-use crate::send;
-
 #[cfg(feature = "hotkeys-evdev")]
 use tracing::info;
 
 #[cfg(feature = "hotkeys-evdev")]
-use crate::{is_running, read};
+use crate::protocol::SidecarCommand;
+
+#[cfg(feature = "hotkeys-evdev")]
+use crate::{is_running, read, send};
 
 pub struct HotkeyBindings {
     pub start_stop: Option<String>,
@@ -40,14 +40,6 @@ impl Default for HotkeyBindings {
             panic_combo: Some("Ctrl+Alt+Backspace".into()),
         }
     }
-}
-
-pub fn execute_panic() -> bool {
-    execute_panic_with(|cmd| send(cmd))
-}
-
-pub fn execute_panic_with(send_cmd: impl Fn(SidecarCommand) -> bool) -> bool {
-    send_cmd(SidecarCommand::Panic)
 }
 
 pub fn spawn_hotkey_thread(stop_flag: Arc<Mutex<bool>>, bindings: HotkeyBindings) {
