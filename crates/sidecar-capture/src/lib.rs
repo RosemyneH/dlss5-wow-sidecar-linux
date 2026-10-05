@@ -1,3 +1,4 @@
+mod doctor;
 mod error;
 mod frame;
 mod hint;
@@ -12,7 +13,11 @@ pub use mock::{
     MOCK_STREAM_H, MOCK_STREAM_W, SYNTHETIC_H, SYNTHETIC_W,
 };
 
-pub use error::CaptureError;
+pub use doctor::{
+    capture_doctor_report, doctor_level_char, format_doctor_line, wayland_ok, CaptureDoctorLevel,
+    CaptureDoctorLine,
+};
+pub use error::{capture_error_remediation, enrich_portal_error, CaptureError};
 pub use frame::CaptureFrame;
 pub use hint::{
     capture_address_override_from_env, hyprland_addresses_equal, identifier_matches_hint,

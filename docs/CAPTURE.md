@@ -2,6 +2,14 @@
 
 **Target:** Hyprland / Sway on Wayland via **xdg-desktop-portal ScreenCast** and PipeWire.
 
+## Readiness check
+
+```bash
+wowsidecar-linux doctor
+```
+
+The **capture (P06)** section reports Wayland session, D-Bus, PipeWire, portal binaries, and Hyprland portal helper status. Fix any `[!]` lines before expecting `capture-test` to work.
+
 ## Primary path
 
 1. `sidecar-capture::start_capture(window_hint)` opens an **org.freedesktop.portal.ScreenCast** session (`ashpd`).
@@ -9,6 +17,8 @@
 3. Frames arrive as **RGBA** (`CaptureFrame { rgba, width, height, timestamp }`).
 
 Pass a `WindowHint` from `wow_window_hint()` / `sidecar_core::list_wow_windows()` so the CLI can log which WoW surface to select. Hyprland window addresses from `hyprctl` (`0x…` hex) are normalized when matching portal or PipeWire node metadata (`identifier_matches_hint`, `hyprland_addresses_equal`).
+
+Portal failures are sent on the frame channel (not only as a silent timeout). `capture-test` prints `capture_error_remediation()` hints; portal errors from ashpd are expanded via `enrich_portal_error()`.
 
 ## Automatic PipeWire node (no env vars)
 
@@ -55,4 +65,12 @@ Raw RGBA is read from stdout using dimensions from `WindowHint` (or 1920×1080).
 wowsidecar-linux capture-test --frames 10
 ```
 
-Requires an interactive Wayland session and approving the portal prompt (unless `WOWSIDECAR_CAPTURE_NODE` is set and valid).
+Requires an interactive Wayland session and approving the portal prompt (unless `WOWSIDECAR_CAPTURE_NODE` is set and valid). On failure, stderr includes remediation text and a pointer to `doctor`.
+
+| Symptom | Likely fix |
+|---------|------------|
+| Dialog closed / cancelled | Run `capture-test` again and select a window |
+| No picker appears | Check `doctor` D-Bus and `xdg-desktop-portal` lines |
+| Hyprland only shows monitors | Install `xdg-desktop-portal-hyprland` |
+| Timeout on frame 0 | Approve ScreenCast or read the portal error printed on stderr |
+| Stale node env | `unset WOWSIDECAR_CAPTURE_NODE` and use ScreenCast |

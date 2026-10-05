@@ -1,7 +1,7 @@
 use std::sync::mpsc::{self, Receiver};
 use std::time::Duration;
 
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::error::CaptureError;
 use crate::frame::CaptureFrame;
@@ -32,7 +32,8 @@ impl FrameStream {
         match self.rx.recv_timeout(timeout) {
             Ok(frame) => frame,
             Err(mpsc::RecvTimeoutError::Timeout) => Err(CaptureError::Unavailable(
-                "timed out waiting for frame".into(),
+                "timed out waiting for frame — approve the ScreenCast dialog or see docs/CAPTURE.md"
+                    .into(),
             )),
             Err(mpsc::RecvTimeoutError::Disconnected) => Err(CaptureError::StreamClosed),
         }
@@ -75,6 +76,7 @@ pub fn start_capture(window_hint: Option<WindowHint>) -> Result<FrameStream, Cap
     ensure_wayland()?;
 
     let (tx, rx) = mpsc::channel();
+    let mut direct_err: Option<CaptureError> = None;
 
     if let Some(node_id) = resolve_capture_node_id(window_hint.as_ref()) {
         match spawn_direct_pipewire_stream(node_id, window_hint.clone(), tx.clone()) {
@@ -89,9 +91,10 @@ pub fn start_capture(window_hint: Option<WindowHint>) -> Result<FrameStream, Cap
                 });
             }
             Err(e) => {
-                debug!(
-                    error = %e,
-                    "WOWSIDECAR_CAPTURE_NODE path failed, trying portal ScreenCast"
+                direct_err = Some(e);
+                warn!(
+                    node_id,
+                    "direct PipeWire node capture failed; falling back to portal ScreenCast"
                 );
             }
         }
@@ -106,7 +109,11 @@ pub fn start_capture(window_hint: Option<WindowHint>) -> Result<FrameStream, Cap
             });
         }
         Err(portal_err) => {
-            debug!(error = %portal_err, "portal capture unavailable, trying pw-record");
+            let chain = match &direct_err {
+                Some(d) => format!("{d}; portal thread: {portal_err}"),
+                None => portal_err.to_string(),
+            };
+            warn!(error = %chain, "portal capture unavailable, trying pw-record");
         }
     }
 
@@ -119,12 +126,9 @@ pub fn start_capture(window_hint: Option<WindowHint>) -> Result<FrameStream, Cap
 }
 
 fn ensure_wayland() -> Result<(), CaptureError> {
-    let session = std::env::var("XDG_SESSION_TYPE").unwrap_or_default();
-    if session.eq_ignore_ascii_case("wayland") {
+    if crate::doctor::wayland_ok() {
         return Ok(());
     }
-    if std::env::var("WAYLAND_DISPLAY").is_ok() {
-        return Ok(());
-    }
+    let session = std::env::var("XDG_SESSION_TYPE").unwrap_or_else(|_| "unknown".into());
     Err(CaptureError::NotWayland(session))
 }

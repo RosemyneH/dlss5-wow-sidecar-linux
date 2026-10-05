@@ -10,7 +10,7 @@ use pipewire as pw;
 use pw::{properties::properties, spa};
 use tracing::{info, warn};
 
-use crate::error::CaptureError;
+use crate::error::{enrich_portal_error, CaptureError};
 use crate::frame::CaptureFrame;
 use crate::hint::WindowHint;
 
@@ -45,8 +45,9 @@ pub fn spawn_portal_stream(
             }
         };
 
-        if let Err(e) = runtime.block_on(run_portal_capture(hint, frame_tx)) {
-            warn!(error = %e, "portal capture ended");
+        if let Err(e) = runtime.block_on(run_portal_capture(hint, frame_tx.clone())) {
+            let _ = frame_tx.send(Err(e));
+            warn!("portal capture ended");
         }
     });
 
@@ -65,11 +66,16 @@ async fn run_portal_capture(
             "portal capture: pick this window in the dialog when prompted"
         );
     } else {
-        info!("portal capture: select a window in the portal dialog");
+        info!("portal capture: select a window in the portal dialog (Window tab on Hyprland)");
     }
 
+    info!("portal: waiting for ScreenCast picker — approve sharing in the desktop dialog");
     let (portal_stream, fd) = open_portal().await?;
     let node_id = portal_stream.pipe_wire_node_id();
+    info!(
+        node_id,
+        "portal ScreenCast active — set WOWSIDECAR_CAPTURE_NODE={node_id} to skip the picker while this node exists"
+    );
     start_pipewire(node_id, Some(fd), frame_tx)
 }
 
@@ -94,8 +100,9 @@ pub fn spawn_direct_pipewire_stream(
     }
 
     let join = thread::spawn(move || {
-        if let Err(e) = start_pipewire(node_id, None, frame_tx) {
-            warn!(error = %e, "direct pipewire capture ended");
+        if let Err(e) = start_pipewire(node_id, None, frame_tx.clone()) {
+            let _ = frame_tx.send(Err(e));
+            warn!("direct pipewire capture ended");
         }
     });
 
@@ -105,11 +112,11 @@ pub fn spawn_direct_pipewire_stream(
 async fn open_portal() -> Result<(PortalStream, OwnedFd), CaptureError> {
     let proxy = Screencast::new()
         .await
-        .map_err(|e| CaptureError::Portal(e.to_string()))?;
+        .map_err(|e| portal_err(e.to_string()))?;
     let session = proxy
         .create_session(Default::default())
         .await
-        .map_err(|e| CaptureError::Portal(e.to_string()))?;
+        .map_err(|e| portal_err(e.to_string()))?;
 
     proxy
         .select_sources(
@@ -122,27 +129,31 @@ async fn open_portal() -> Result<(PortalStream, OwnedFd), CaptureError> {
                 .set_persist_mode(PersistMode::DoNot),
         )
         .await
-        .map_err(|e| CaptureError::Portal(e.to_string()))?;
+        .map_err(|e| portal_err(e.to_string()))?;
 
     let response = proxy
         .start(&session, None, Default::default())
         .await
-        .map_err(|e| CaptureError::Portal(e.to_string()))?
+        .map_err(|e| portal_err(e.to_string()))?
         .response()
-        .map_err(|e| CaptureError::Portal(e.to_string()))?;
+        .map_err(|e| portal_err(e.to_string()))?;
 
     let stream = response
         .streams()
         .first()
         .cloned()
-        .ok_or_else(|| CaptureError::Portal("no stream selected in portal dialog".into()))?;
+        .ok_or_else(|| portal_err("no stream selected in portal dialog".into()))?;
 
     let fd = proxy
         .open_pipe_wire_remote(&session, Default::default())
         .await
-        .map_err(|e| CaptureError::Portal(e.to_string()))?;
+        .map_err(|e| portal_err(e.to_string()))?;
 
     Ok((stream, fd))
+}
+
+fn portal_err(raw: String) -> CaptureError {
+    CaptureError::Portal(enrich_portal_error(&raw))
 }
 
 fn start_pipewire(
