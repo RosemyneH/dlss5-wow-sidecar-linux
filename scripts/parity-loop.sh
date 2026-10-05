@@ -7,7 +7,7 @@ MAX_ROUNDS="${1:-10}"
 open_p06_p16() {
   rg '^\| P(0[6-9]|1[0-6]) ' "$ROOT/docs/PARITY.md" | while IFS= read -r line; do
     linux="$(echo "$line" | awk -F'|' '{gsub(/^ +| +$/,"",$5); print $5}')"
-    if [[ "$linux" != yes ]]; then
+    if [[ "$linux" != yes* ]]; then
       echo "$line"
     fi
   done
