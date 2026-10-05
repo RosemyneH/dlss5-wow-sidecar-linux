@@ -1,0 +1,17 @@
+[package]
+name = "wowsidecar-linux"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Linux-native WoW sidecar: discover installs, track windows, capture pipeline (WIP)"
+
+[[bin]]
+name = "wowsidecar-linux"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+sidecar-core = { path = "../sidecar-core" }
+tracing.workspace = true
+tracing-subscriber.workspace = true
