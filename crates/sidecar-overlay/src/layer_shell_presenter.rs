@@ -1,13 +1,15 @@
-use std::convert::TryInto;
-use std::time::{Duration, Instant};
+use std::io;
+use std::time::Duration;
 
 use crate::geometry::{poll_tracked_wow_geometry, GeometrySync};
 use crate::presenter::validate_frame_blit;
 use crate::presenter::OverlayError;
 use crate::pump::OverlayPumpOutcome;
 
+use rustix::event::{poll, PollFd, PollFlags, Timespec};
+use rustix::io::Errno;
 use sidecar_core::DesktopWindow;
-use smithay_client_toolkit::compositor::{CompositorHandler, CompositorState};
+use smithay_client_toolkit::compositor::{CompositorHandler, CompositorState, Region};
 use smithay_client_toolkit::delegate_compositor;
 use smithay_client_toolkit::delegate_layer;
 use smithay_client_toolkit::delegate_output;
@@ -23,19 +25,12 @@ use smithay_client_toolkit::shell::wlr_layer::{
 use smithay_client_toolkit::shell::WaylandSurface;
 use smithay_client_toolkit::shm::{slot::SlotPool, Shm, ShmHandler};
 use tracing::warn;
+use wayland_client::backend::WaylandError;
 use wayland_client::globals::{registry_queue_init, GlobalList};
 use wayland_client::protocol::wl_shm::Format;
 use wayland_client::protocol::{wl_output, wl_surface};
-use wayland_client::{Connection, DispatchError, EventQueue, QueueHandle};
+use wayland_client::{Connection, EventQueue, QueueHandle};
 use winit::platform::pump_events::PumpStatus;
-
-struct PendingFrame {
-    pixels: Vec<u8>,
-    x: u32,
-    y: u32,
-    w: u32,
-    h: u32,
-}
 
 struct LayerShellApp {
     registry_state: RegistryState,
@@ -45,10 +40,10 @@ struct LayerShellApp {
     layer: LayerSurface,
     desktop: DesktopWindow,
     backing: Vec<u32>,
-    pending: Option<PendingFrame>,
     dirty: bool,
     visible: bool,
     configured: bool,
+    frame_pending: bool,
     exit: bool,
     width: u32,
     height: u32,
@@ -72,54 +67,65 @@ impl LayerShellApp {
             None,
         );
         layer.set_keyboard_interactivity(KeyboardInteractivity::None);
+        layer.set_exclusive_zone(-1);
+        let input = Region::new(compositor).map_err(layer_shell_err)?;
+        layer.set_input_region(Some(input.wl_region()));
         apply_layer_geometry(&layer, &desktop);
 
         let width = desktop.width.max(1);
         let height = desktop.height.max(1);
-        let pool = SlotPool::new((width * height * 4) as usize, &shm).map_err(layer_shell_err)?;
+        let pool = SlotPool::new(frame_bytes(width, height), &shm).map_err(layer_shell_err)?;
 
-        let len = width as usize * height as usize;
-        let mut app = Self {
+        layer.commit();
+        Ok(Self {
             registry_state: RegistryState::new(globals),
             output_state: OutputState::new(globals, qh),
             shm,
             pool,
             layer,
+            backing: vec![0; pixel_count(&desktop)],
             desktop,
-            backing: vec![0; len],
-            pending: None,
             dirty: false,
             visible: true,
             configured: false,
+            frame_pending: false,
             exit: false,
             width,
             height,
-        };
-        app.layer.commit();
-        Ok(app)
+        })
     }
 
     fn set_visible(&mut self, visible: bool) {
+        if self.visible == visible {
+            return;
+        }
         self.visible = visible;
-        self.dirty = true;
+        self.frame_pending = false;
+        if visible {
+            // ʕ •ᴥ•ʔ✿ an unmapped layer surface must recommit without a buffer and await configure ✿ ʕ •ᴥ•ʔ
+            apply_layer_geometry(&self.layer, &self.desktop);
+            self.dirty = true;
+        } else {
+            self.layer.wl_surface().attach(None, 0, 0);
+            self.configured = false;
+        }
+        self.layer.commit();
     }
 
-    fn queue_frame(
-        &mut self,
-        rgba: &[u8],
-        x: u32,
-        y: u32,
-        w: u32,
-        h: u32,
-    ) -> Result<(), OverlayError> {
+    fn blit(&mut self, rgba: &[u8], x: u32, y: u32, w: u32, h: u32) -> Result<(), OverlayError> {
         validate_frame_blit(self.desktop.width, self.desktop.height, rgba, x, y, w, h)?;
-        self.pending = Some(PendingFrame {
-            pixels: rgba.to_vec(),
-            x,
-            y,
-            w,
-            h,
-        });
+        if w == 0 || h == 0 {
+            return Ok(());
+        }
+        let stride = self.desktop.width as usize;
+        let (x, w) = (x as usize, w as usize);
+        for (row, src) in rgba.chunks_exact(w * 4).enumerate() {
+            let start = (y as usize + row) * stride + x;
+            let (src, _) = src.as_chunks::<4>();
+            for (dst, &[r, g, b, a]) in self.backing[start..start + w].iter_mut().zip(src) {
+                *dst = premultiplied_argb(r, g, b, a);
+            }
+        }
         self.dirty = true;
         Ok(())
     }
@@ -129,79 +135,58 @@ impl LayerShellApp {
             self.desktop.width != desktop.width || self.desktop.height != desktop.height;
         self.desktop = desktop;
         if size_changed {
-            let len = self.desktop.width as usize * self.desktop.height as usize;
-            self.backing = vec![0; len.max(1)];
-            self.width = self.desktop.width.max(1);
-            self.height = self.desktop.height.max(1);
+            self.backing = vec![0; pixel_count(&self.desktop)];
             self.dirty = true;
-            let bytes = self.width.saturating_mul(self.height).saturating_mul(4);
-            match SlotPool::new(bytes as usize, &self.shm) {
-                Ok(pool) => self.pool = pool,
-                Err(e) => warn!("layer-shell shm pool resize: {e}"),
-            }
         }
         apply_layer_geometry(&self.layer, &self.desktop);
         self.layer.commit();
     }
 
-    fn apply_pending(&mut self) {
-        let Some(frame) = self.pending.take() else {
-            return;
-        };
-        let stride = self.desktop.width as usize;
-        for row in 0..frame.h as usize {
-            let dst_y = frame.y as usize + row;
-            let src_off = row * frame.w as usize * 4;
-            for col in 0..frame.w as usize {
-                let dst_x = frame.x as usize + col;
-                let i = src_off + col * 4;
-                let r = u32::from(frame.pixels[i]);
-                let g = u32::from(frame.pixels[i + 1]);
-                let b = u32::from(frame.pixels[i + 2]);
-                let a = u32::from(frame.pixels[i + 3]);
-                let dst = dst_y * stride + dst_x;
-                if dst < self.backing.len() {
-                    self.backing[dst] = b | (g << 8) | (r << 16) | (a << 24);
-                }
-            }
+    fn request_draw(&mut self, qh: &QueueHandle<Self>) -> Result<(), OverlayError> {
+        if self.dirty && !self.frame_pending {
+            self.draw(qh)?;
         }
+        Ok(())
     }
 
     fn draw(&mut self, qh: &QueueHandle<Self>) -> Result<(), OverlayError> {
-        if !self.visible {
-            self.layer.wl_surface().attach(None, 0, 0);
-            self.layer.commit();
-            self.dirty = false;
+        if !self.visible || !self.configured {
             return Ok(());
         }
-        if self.dirty {
-            self.apply_pending();
-        }
-        let width = self.width;
-        let height = self.height;
-        let stride = width as i32 * 4;
+        let width = self.width as usize;
+        let height = self.height as usize;
+        let stride = width * 4;
 
         let (buffer, canvas) = self
             .pool
-            .create_buffer(width as i32, height as i32, stride, Format::Argb8888)
+            .create_buffer(
+                self.width as i32,
+                self.height as i32,
+                stride as i32,
+                Format::Argb8888,
+            )
             .map_err(layer_shell_err)?;
 
-        for (i, chunk) in canvas.chunks_exact_mut(4).enumerate() {
-            let pixel = self.backing.get(i).copied().unwrap_or(0);
-            let array: &mut [u8; 4] = chunk.try_into().expect("pixel");
-            *array = pixel.to_le_bytes();
+        canvas.fill(0);
+        let src_stride = self.desktop.width as usize;
+        let copy_w = width.min(src_stride);
+        let rows = canvas
+            .chunks_exact_mut(stride)
+            .zip(self.backing.chunks_exact(src_stride.max(1)))
+            .take(height);
+        for (dst, src) in rows {
+            let (dst, _) = dst.as_chunks_mut::<4>();
+            for (px, &argb) in dst[..copy_w].iter_mut().zip(&src[..copy_w]) {
+                *px = argb.to_le_bytes();
+            }
         }
 
-        self.layer
-            .wl_surface()
-            .damage_buffer(0, 0, width as i32, height as i32);
-        buffer
-            .attach_to(self.layer.wl_surface())
-            .map_err(layer_shell_err)?;
-        self.layer
-            .wl_surface()
-            .frame(qh, self.layer.wl_surface().clone());
+        let surface = self.layer.wl_surface();
+        surface.damage_buffer(0, 0, self.width as i32, self.height as i32);
+        surface.frame(qh, surface.clone());
+        buffer.attach_to(surface).map_err(layer_shell_err)?;
         self.layer.commit();
+        self.frame_pending = true;
         self.dirty = false;
         Ok(())
     }
@@ -211,6 +196,20 @@ fn apply_layer_geometry(layer: &LayerSurface, desktop: &DesktopWindow) {
     layer.set_anchor(Anchor::TOP | Anchor::LEFT);
     layer.set_margin(desktop.y, 0, 0, desktop.x);
     layer.set_size(desktop.width.max(1), desktop.height.max(1));
+}
+
+fn pixel_count(desktop: &DesktopWindow) -> usize {
+    (desktop.width as usize * desktop.height as usize).max(1)
+}
+
+fn frame_bytes(width: u32, height: u32) -> usize {
+    width as usize * height as usize * 4
+}
+
+fn premultiplied_argb(r: u8, g: u8, b: u8, a: u8) -> u32 {
+    let a32 = u32::from(a);
+    let mul = |c: u8| (u32::from(c) * a32 + 127) / 255;
+    mul(b) | (mul(g) << 8) | (mul(r) << 16) | (a32 << 24)
 }
 
 fn layer_shell_err<E: std::fmt::Display>(err: E) -> OverlayError {
@@ -246,7 +245,8 @@ impl CompositorHandler for LayerShellApp {
         if self.layer.wl_surface() != surface {
             return;
         }
-        if let Err(e) = self.draw(qh) {
+        self.frame_pending = false;
+        if let Err(e) = self.request_draw(qh) {
             warn!("layer-shell present: {e}");
         }
     }
@@ -313,10 +313,9 @@ impl LayerShellHandler for LayerShellApp {
         configure: LayerSurfaceConfigure,
         _serial: u32,
     ) {
-        if configure.new_size.0 > 0 && configure.new_size.1 > 0 {
-            self.width = configure.new_size.0;
-            self.height = configure.new_size.1;
-        }
+        let (w, h) = configure.new_size;
+        self.width = if w > 0 { w } else { self.desktop.width.max(1) };
+        self.height = if h > 0 { h } else { self.desktop.height.max(1) };
         self.configured = true;
         self.dirty = true;
         if let Err(e) = self.draw(qh) {
@@ -345,7 +344,6 @@ impl ProvidesRegistryState for LayerShellApp {
 }
 
 pub(crate) struct LayerShellOverlayPresenter {
-    conn: Connection,
     queue: EventQueue<LayerShellApp>,
     app: LayerShellApp,
 }
@@ -368,9 +366,9 @@ impl LayerShellOverlayPresenter {
             shm,
             desktop.clone(),
         )?;
-        queue.roundtrip(&mut app).map_err(map_dispatch_err)?;
+        queue.roundtrip(&mut app).map_err(layer_shell_err)?;
 
-        Ok(Self { conn, queue, app })
+        Ok(Self { queue, app })
     }
 
     pub fn show_frame(
@@ -381,20 +379,19 @@ impl LayerShellOverlayPresenter {
         w: u32,
         h: u32,
     ) -> Result<(), OverlayError> {
-        self.app.queue_frame(rgba, x, y, w, h)?;
-        if self.app.configured {
-            let qh = self.queue.handle();
-            self.app.draw(&qh)?;
-            self.conn.flush().map_err(layer_shell_err)?;
-        }
-        Ok(())
+        self.app.blit(rgba, x, y, w, h)?;
+        let qh = self.queue.handle();
+        self.app.request_draw(&qh)?;
+        self.queue.flush().map_err(layer_shell_err)
     }
 
     pub fn refresh_geometry(&mut self) -> GeometrySync {
         let (sync, updated) = poll_tracked_wow_geometry(&self.app.desktop);
         if let Some(desktop) = updated {
             self.app.apply_desktop_geometry(desktop);
-            let _ = self.conn.flush();
+            if let Err(e) = self.queue.flush() {
+                warn!("layer-shell geometry flush: {e}");
+            }
         }
         sync
     }
@@ -422,18 +419,15 @@ impl LayerShellOverlayPresenter {
 
     pub fn set_visible(&mut self, visible: bool) {
         self.app.set_visible(visible);
-        if self.app.configured {
-            let qh = self.queue.handle();
-            if let Err(e) = self.app.draw(&qh) {
-                warn!("layer-shell set_visible: {e}");
-            }
-            let _ = self.conn.flush();
+        if let Err(e) = self.queue.flush() {
+            warn!("layer-shell set_visible: {e}");
         }
     }
 
     fn pump_events_outcome(&mut self, timeout: Option<Duration>) -> OverlayPumpOutcome {
-        if let Err(e) = dispatch_events(&self.conn, &mut self.queue, &mut self.app, timeout) {
-            warn!("layer-shell pump: {e}");
+        if let Err(e) = dispatch_events(&mut self.queue, &mut self.app, timeout) {
+            warn!("layer-shell connection lost: {e}");
+            return OverlayPumpOutcome::Exit(1);
         }
         if self.app.exit {
             OverlayPumpOutcome::Exit(0)
@@ -444,40 +438,41 @@ impl LayerShellOverlayPresenter {
 }
 
 fn dispatch_events(
-    conn: &Connection,
     queue: &mut EventQueue<LayerShellApp>,
     app: &mut LayerShellApp,
     timeout: Option<Duration>,
 ) -> Result<(), OverlayError> {
-    queue.flush().map_err(map_wayland_err)?;
-    let _ = queue.dispatch_pending(app).map_err(map_dispatch_err)?;
+    let dispatched = queue.dispatch_pending(app).map_err(layer_shell_err)?;
+    queue.flush().map_err(layer_shell_err)?;
 
-    match timeout {
-        Some(Duration::ZERO) => return Ok(()),
-        None => {
-            queue.blocking_dispatch(app).map_err(map_dispatch_err)?;
-            return Ok(());
-        }
-        Some(duration) => {
-            let deadline = Instant::now() + duration;
-            while Instant::now() < deadline {
-                if queue.dispatch_pending(app).map_err(map_dispatch_err)? > 0 {
-                    return Ok(());
-                }
-                queue.flush().map_err(map_wayland_err)?;
-                if queue.prepare_read().is_some() {
-                    break;
-                }
+    if let Some(guard) = queue.prepare_read() {
+        let wait = if dispatched > 0 {
+            Some(Duration::ZERO)
+        } else {
+            timeout
+        };
+        if socket_readable(&guard.connection_fd(), wait)? {
+            match guard.read() {
+                Ok(_) => {}
+                Err(WaylandError::Io(e)) if e.kind() == io::ErrorKind::WouldBlock => {}
+                Err(e) => return Err(layer_shell_err(e)),
             }
-            Ok(())
         }
     }
+
+    queue.dispatch_pending(app).map_err(layer_shell_err)?;
+    Ok(())
 }
 
-fn map_wayland_err<E: std::fmt::Display>(err: E) -> OverlayError {
-    OverlayError::LayerShell(err.to_string())
-}
-
-fn map_dispatch_err(err: DispatchError) -> OverlayError {
-    OverlayError::LayerShell(err.to_string())
+fn socket_readable(
+    fd: &impl std::os::fd::AsFd,
+    timeout: Option<Duration>,
+) -> Result<bool, OverlayError> {
+    let timeout = timeout.and_then(|d| Timespec::try_from(d).ok());
+    let mut fds = [PollFd::new(fd, PollFlags::IN | PollFlags::ERR)];
+    match poll(&mut fds, timeout.as_ref()) {
+        Ok(n) => Ok(n > 0),
+        Err(Errno::INTR) => Ok(false),
+        Err(e) => Err(layer_shell_err(e)),
+    }
 }

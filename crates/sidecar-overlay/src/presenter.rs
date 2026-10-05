@@ -1,6 +1,6 @@
 use std::num::NonZeroU32;
 use std::rc::Rc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::geometry::{poll_tracked_wow_geometry, GeometrySync};
 use crate::pump::OverlayPumpOutcome;
@@ -10,8 +10,7 @@ use softbuffer::{Context, Surface};
 use thiserror::Error;
 use tracing::warn;
 use winit::application::ApplicationHandler;
-use winit::dpi::PhysicalPosition;
-use winit::dpi::PhysicalSize;
+use winit::dpi::{LogicalPosition, LogicalSize, PhysicalPosition, PhysicalSize};
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, EventLoop, OwnedDisplayHandle};
 use winit::platform::pump_events::{EventLoopExtPumpEvents, PumpStatus};
@@ -54,12 +53,135 @@ struct PendingFrame {
     h: u32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct OverlayExtent {
+    position: PhysicalPosition<i32>,
+    size: PhysicalSize<u32>,
+}
+
+// ʕ •ᴥ•ʔ✿ Window probes (hyprctl / swaymsg) report logical compositor units ✿ ʕ •ᴥ•ʔ
+fn physical_extent(desktop: &DesktopWindow, scale_factor: f64) -> OverlayExtent {
+    OverlayExtent {
+        position: LogicalPosition::new(desktop.x, desktop.y).to_physical(scale_factor),
+        size: LogicalSize::new(desktop.width, desktop.height).to_physical(scale_factor),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ChromeDelta {
+    moved: bool,
+    resized: bool,
+    fullscreen: bool,
+}
+
+impl ChromeDelta {
+    const ALL: Self = Self {
+        moved: true,
+        resized: true,
+        fullscreen: true,
+    };
+
+    fn between(old: &DesktopWindow, new: &DesktopWindow) -> Self {
+        Self {
+            moved: old.x != new.x || old.y != new.y,
+            resized: old.width != new.width || old.height != new.height,
+            fullscreen: old.fullscreen != new.fullscreen,
+        }
+    }
+
+    fn any(self) -> bool {
+        self.moved || self.resized || self.fullscreen
+    }
+}
+
+const GEOMETRY_POLL_INTERVAL: Duration = Duration::from_millis(50);
+
+struct GeometryPoller {
+    interval: Duration,
+    last: Option<Instant>,
+}
+
+impl GeometryPoller {
+    fn new(interval: Duration) -> Self {
+        Self {
+            interval,
+            last: None,
+        }
+    }
+
+    fn due(&mut self, now: Instant) -> bool {
+        if self
+            .last
+            .is_some_and(|last| now.duration_since(last) < self.interval)
+        {
+            return false;
+        }
+        self.last = Some(now);
+        true
+    }
+}
+
+struct Backing {
+    width: u32,
+    height: u32,
+    pixels: Vec<u32>,
+}
+
+impl Backing {
+    fn new(size: PhysicalSize<u32>) -> Self {
+        Self {
+            width: size.width,
+            height: size.height,
+            pixels: vec![0; size.width as usize * size.height as usize],
+        }
+    }
+
+    fn resize(&mut self, size: PhysicalSize<u32>) -> bool {
+        if self.width == size.width && self.height == size.height {
+            return false;
+        }
+        *self = Self::new(size);
+        true
+    }
+
+    fn blit_rgba(&mut self, frame: &PendingFrame) {
+        let cols = frame.w.min(self.width.saturating_sub(frame.x)) as usize;
+        let rows = frame.h.min(self.height.saturating_sub(frame.y)) as usize;
+        let stride = self.width as usize;
+        for row in 0..rows {
+            let src = &frame.pixels[row * frame.w as usize * 4..][..cols * 4];
+            let dst_off = (frame.y as usize + row) * stride + frame.x as usize;
+            let px_rows = src.as_chunks::<4>().0;
+            for (dst, px) in self.pixels[dst_off..dst_off + cols]
+                .iter_mut()
+                .zip(px_rows.iter().take(cols))
+            {
+                let [r, g, b, a] = [px[0], px[1], px[2], px[3]].map(u32::from);
+                *dst = b | (g << 8) | (r << 16) | (a << 24);
+            }
+        }
+    }
+
+    fn copy_into(&self, dst: &mut [u32], dst_width: u32, dst_height: u32) {
+        let cols = self.width.min(dst_width) as usize;
+        let rows = self.height.min(dst_height) as usize;
+        for row in 0..rows {
+            let src = &self.pixels[row * self.width as usize..][..cols];
+            let out = &mut dst[row * dst_width as usize..][..dst_width as usize];
+            out[..cols].copy_from_slice(src);
+            out[cols..].fill(0);
+        }
+        dst[rows * dst_width as usize..].fill(0);
+    }
+}
+
 struct OverlayApp {
     context: Context<OwnedDisplayHandle>,
     desktop: DesktopWindow,
+    scale_factor: f64,
     window: Option<Rc<Window>>,
     surface: Option<Surface<OwnedDisplayHandle, Rc<Window>>>,
-    backing: Vec<u32>,
+    backing: Backing,
     pending: Option<PendingFrame>,
     dirty: bool,
     visible: bool,
@@ -67,17 +189,29 @@ struct OverlayApp {
 
 impl OverlayApp {
     fn new(context: Context<OwnedDisplayHandle>, desktop: DesktopWindow) -> Self {
-        let len = desktop.width as usize * desktop.height as usize;
+        let backing = Backing::new(physical_extent(&desktop, 1.0).size);
         Self {
             context,
             desktop,
+            scale_factor: 1.0,
             window: None,
             surface: None,
-            backing: vec![0; len],
+            backing,
             pending: None,
             dirty: false,
             visible: true,
         }
+    }
+
+    fn resize_backing(&mut self, size: PhysicalSize<u32>) {
+        if self.backing.resize(size) {
+            self.dirty = true;
+        }
+    }
+
+    fn apply_scale_factor(&mut self, scale_factor: f64) {
+        self.scale_factor = scale_factor;
+        self.resize_backing(physical_extent(&self.desktop, scale_factor).size);
     }
 
     fn set_visible(&mut self, visible: bool) {
@@ -95,7 +229,7 @@ impl OverlayApp {
         w: u32,
         h: u32,
     ) -> Result<(), OverlayError> {
-        validate_frame_blit(self.desktop.width, self.desktop.height, rgba, x, y, w, h)?;
+        validate_frame_blit(self.backing.width, self.backing.height, rgba, x, y, w, h)?;
         self.pending = Some(PendingFrame {
             pixels: rgba.to_vec(),
             x,
@@ -111,44 +245,23 @@ impl OverlayApp {
     }
 
     fn apply_desktop_geometry(&mut self, desktop: DesktopWindow) {
-        let size_changed =
-            self.desktop.width != desktop.width || self.desktop.height != desktop.height;
+        let delta = ChromeDelta::between(&self.desktop, &desktop);
         self.desktop = desktop;
-        if size_changed {
-            let len = self.desktop.width as usize * self.desktop.height as usize;
-            self.backing = vec![0; len];
-            self.dirty = true;
+        if !delta.any() {
+            return;
+        }
+        if delta.resized {
+            self.resize_backing(physical_extent(&self.desktop, self.scale_factor).size);
         }
         if let Some(window) = &self.window {
-            apply_window_chrome(window, &self.desktop);
+            apply_window_chrome(window, &self.desktop, delta);
             window.request_redraw();
         }
     }
 
-    fn apply_pending(&mut self) {
-        let Some(frame) = self.pending.take() else {
-            return;
-        };
-        let stride = self.desktop.width as usize;
-        for row in 0..frame.h as usize {
-            let dst_y = frame.y as usize + row;
-            let src_off = row * frame.w as usize * 4;
-            for col in 0..frame.w as usize {
-                let dst_x = frame.x as usize + col;
-                let i = src_off + col * 4;
-                let r = u32::from(frame.pixels[i]);
-                let g = u32::from(frame.pixels[i + 1]);
-                let b = u32::from(frame.pixels[i + 2]);
-                let a = u32::from(frame.pixels[i + 3]);
-                let dst = dst_y * stride + dst_x;
-                self.backing[dst] = b | (g << 8) | (r << 16) | (a << 24);
-            }
-        }
-    }
-
     fn present(&mut self) -> Result<(), OverlayError> {
-        if self.dirty {
-            self.apply_pending();
+        if let Some(frame) = self.pending.take() {
+            self.backing.blit_rgba(&frame);
         }
         let surface = self.surface.as_mut().ok_or(OverlayError::NotReady)?;
         let size = self.window.as_ref().expect("window").inner_size();
@@ -157,8 +270,7 @@ impl OverlayApp {
         };
         surface.resize(w, h).map_err(OverlayError::Softbuffer)?;
         let mut buffer = surface.buffer_mut().map_err(OverlayError::Softbuffer)?;
-        let len = buffer.len().min(self.backing.len());
-        buffer[..len].copy_from_slice(&self.backing[..len]);
+        self.backing.copy_into(&mut buffer, size.width, size.height);
         buffer.present().map_err(OverlayError::Softbuffer)?;
         self.dirty = false;
         Ok(())
@@ -175,8 +287,8 @@ impl ApplicationHandler for OverlayApp {
             .with_transparent(true)
             .with_decorations(false)
             .with_window_level(WindowLevel::AlwaysOnTop)
-            .with_inner_size(PhysicalSize::new(self.desktop.width, self.desktop.height))
-            .with_position(PhysicalPosition::new(self.desktop.x, self.desktop.y));
+            .with_inner_size(LogicalSize::new(self.desktop.width, self.desktop.height))
+            .with_position(LogicalPosition::new(self.desktop.x, self.desktop.y));
         let window = match event_loop.create_window(attrs) {
             Ok(w) => Rc::new(w),
             Err(e) => {
@@ -184,7 +296,8 @@ impl ApplicationHandler for OverlayApp {
                 return;
             }
         };
-        apply_window_chrome(&window, &self.desktop);
+        self.apply_scale_factor(window.scale_factor());
+        apply_window_chrome(&window, &self.desktop, ChromeDelta::ALL);
         let surface = match Surface::new(&self.context, window.clone()) {
             Ok(s) => s,
             Err(e) => {
@@ -203,6 +316,23 @@ impl ApplicationHandler for OverlayApp {
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::ScaleFactorChanged {
+                scale_factor,
+                mut inner_size_writer,
+            } => {
+                self.apply_scale_factor(scale_factor);
+                let _ = inner_size_writer
+                    .request_inner_size(PhysicalSize::new(self.backing.width, self.backing.height));
+                if let Some(window) = &self.window {
+                    window.request_redraw();
+                }
+            }
+            WindowEvent::Resized(size) => {
+                self.resize_backing(size);
+                if let Some(window) = &self.window {
+                    window.request_redraw();
+                }
+            }
             WindowEvent::RedrawRequested => {
                 if let Err(e) = self.present() {
                     warn!("overlay present: {e}");
@@ -216,6 +346,7 @@ impl ApplicationHandler for OverlayApp {
 struct WinitOverlayPresenter {
     event_loop: EventLoop<()>,
     app: OverlayApp,
+    geometry_poller: GeometryPoller,
 }
 
 impl WinitOverlayPresenter {
@@ -226,6 +357,7 @@ impl WinitOverlayPresenter {
         Ok(Self {
             event_loop,
             app: OverlayApp::new(context, desktop.clone()),
+            geometry_poller: GeometryPoller::new(GEOMETRY_POLL_INTERVAL),
         })
     }
 
@@ -249,7 +381,9 @@ impl WinitOverlayPresenter {
     }
 
     fn pump(&mut self, timeout: Option<Duration>) -> OverlayPumpOutcome {
-        self.refresh_geometry();
+        if self.geometry_poller.due(Instant::now()) {
+            self.refresh_geometry();
+        }
         OverlayPumpOutcome::from_pump_status(
             self.event_loop.pump_app_events(timeout, &mut self.app),
         )
@@ -371,15 +505,21 @@ fn layer_shell_backend_requested() -> bool {
         .unwrap_or(false)
 }
 
-fn apply_window_chrome(window: &Window, desktop: &DesktopWindow) {
+fn apply_window_chrome(window: &Window, desktop: &DesktopWindow, delta: ChromeDelta) {
     window.set_window_level(WindowLevel::AlwaysOnTop);
-    let size = PhysicalSize::new(desktop.width, desktop.height);
-    let _ = window.request_inner_size(size);
-    window.set_outer_position(PhysicalPosition::new(desktop.x, desktop.y));
-    if desktop.fullscreen {
-        window.set_fullscreen(Some(Fullscreen::Borderless(None)));
-    } else {
-        window.set_fullscreen(None);
+    let extent = physical_extent(desktop, window.scale_factor());
+    if delta.resized {
+        let _ = window.request_inner_size(extent.size);
+    }
+    if delta.moved {
+        window.set_outer_position(extent.position);
+    }
+    if delta.fullscreen {
+        if desktop.fullscreen {
+            window.set_fullscreen(Some(Fullscreen::Borderless(None)));
+        } else {
+            window.set_fullscreen(None);
+        }
     }
 }
 

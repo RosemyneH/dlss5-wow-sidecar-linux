@@ -5,7 +5,9 @@ use std::thread::{self, JoinHandle};
 use ashpd::desktop::screencast::{
     CursorMode, Screencast, SelectSourcesOptions, SourceType, Stream as PortalStream,
 };
-use ashpd::desktop::PersistMode;
+use ashpd::desktop::{PersistMode, ResponseError};
+use ashpd::enumflags2::BitFlags;
+use ashpd::PortalError;
 use pipewire as pw;
 use pw::{properties::properties, spa};
 use tracing::{info, warn};
@@ -70,7 +72,7 @@ async fn run_portal_capture(
     }
 
     info!("portal: waiting for ScreenCast picker — approve sharing in the desktop dialog");
-    let (portal_stream, fd) = open_portal().await?;
+    let (portal_stream, fd) = open_portal(hint.as_ref()).await?;
     let node_id = portal_stream.pipe_wire_node_id();
     info!(
         node_id,
@@ -109,51 +111,139 @@ pub fn spawn_direct_pipewire_stream(
     Ok(PortalHandle { join })
 }
 
-async fn open_portal() -> Result<(PortalStream, OwnedFd), CaptureError> {
+const MISSING_BACKEND: &str = "no ScreenCast implementation on the session bus — install/start xdg-desktop-portal plus the compositor backend (Hyprland: xdg-desktop-portal-hyprland, Sway/wlroots: xdg-desktop-portal-wlr, KDE: xdg-desktop-portal-kde, GNOME: xdg-desktop-portal-gnome); `wowsidecar-linux doctor` lists what is missing";
+
+async fn open_portal(hint: Option<&WindowHint>) -> Result<(PortalStream, OwnedFd), CaptureError> {
     let proxy = Screencast::new()
         .await
-        .map_err(|e| portal_err(e.to_string()))?;
+        .map_err(|e| portal_err("connect", &e))?;
+    let available = proxy
+        .available_source_types()
+        .await
+        .map_err(|e| portal_err("query source types", &e))?;
+    let sources = requested_sources(available)?;
+
     let session = proxy
         .create_session(Default::default())
         .await
-        .map_err(|e| portal_err(e.to_string()))?;
+        .map_err(|e| portal_err("create session", &e))?;
 
     proxy
         .select_sources(
             &session,
             SelectSourcesOptions::default()
                 .set_cursor_mode(CursorMode::Metadata)
-                .set_sources(SourceType::Monitor | SourceType::Window)
+                .set_sources(sources)
                 .set_multiple(false)
                 .set_restore_token(None)
                 .set_persist_mode(PersistMode::DoNot),
         )
         .await
-        .map_err(|e| portal_err(e.to_string()))?;
+        .map_err(|e| portal_err("select sources", &e))?;
 
     let response = proxy
         .start(&session, None, Default::default())
         .await
-        .map_err(|e| portal_err(e.to_string()))?
+        .map_err(|e| portal_err("start", &e))?
         .response()
-        .map_err(|e| portal_err(e.to_string()))?;
+        .map_err(|e| portal_err("start", &e))?;
 
-    let stream = response
-        .streams()
-        .first()
-        .cloned()
-        .ok_or_else(|| portal_err("no stream selected in portal dialog".into()))?;
+    let stream = pick_stream(response.streams(), hint)?;
 
     let fd = proxy
         .open_pipe_wire_remote(&session, Default::default())
         .await
-        .map_err(|e| portal_err(e.to_string()))?;
+        .map_err(|e| portal_err("open PipeWire remote", &e))?;
 
     Ok((stream, fd))
 }
 
-fn portal_err(raw: String) -> CaptureError {
-    CaptureError::Portal(enrich_portal_error(&raw))
+fn requested_sources(
+    available: BitFlags<SourceType>,
+) -> Result<BitFlags<SourceType>, CaptureError> {
+    let wanted = available & (SourceType::Monitor | SourceType::Window);
+    if wanted.is_empty() {
+        return Err(CaptureError::Portal(format!(
+            "ScreenCast advertises no monitor or window sources (AvailableSourceTypes={available:?}) — {MISSING_BACKEND}"
+        )));
+    }
+    if !wanted.contains(SourceType::Window) {
+        warn!(
+            "ScreenCast backend is monitor-only (e.g. xdg-desktop-portal-wlr) — pick the output that shows WoW; install xdg-desktop-portal-hyprland on Hyprland for per-window capture"
+        );
+    }
+    Ok(wanted)
+}
+
+fn pick_stream(
+    streams: &[PortalStream],
+    hint: Option<&WindowHint>,
+) -> Result<PortalStream, CaptureError> {
+    let Some(stream) = streams.first() else {
+        return Err(CaptureError::Portal(
+            "portal returned no stream — sharing was denied or nothing was selected; run capture-test again and pick the WoW window".into(),
+        ));
+    };
+    if streams.len() > 1 {
+        warn!(
+            count = streams.len(),
+            "portal shared several sources; using the first"
+        );
+    }
+    if stream.source_type() != Some(SourceType::Monitor) {
+        return Ok(stream.clone());
+    }
+
+    let (Some(h), Some(pos), Some(size)) = (hint, stream.position(), stream.size()) else {
+        info!("portal shared a whole monitor; the overlay will see the full output");
+        return Ok(stream.clone());
+    };
+    if !window_on_monitor(h, pos, size) {
+        return Err(CaptureError::Portal(format!(
+            "multi-monitor: shared monitor at {},{} ({}x{}) does not contain the WoW window at {},{} ({}x{}) — run capture-test again and pick the WoW window, or the monitor it is on",
+            pos.0, pos.1, size.0, size.1, h.x, h.y, h.width, h.height
+        )));
+    }
+    info!(
+        x = pos.0,
+        y = pos.1,
+        width = size.0,
+        height = size.1,
+        "portal shared the monitor containing WoW; picking the window instead avoids capturing other surfaces"
+    );
+    Ok(stream.clone())
+}
+
+fn window_on_monitor(hint: &WindowHint, pos: (i32, i32), size: (i32, i32)) -> bool {
+    let cx = i64::from(hint.x) + i64::from(hint.width) / 2;
+    let cy = i64::from(hint.y) + i64::from(hint.height) / 2;
+    let (mx, my) = (i64::from(pos.0), i64::from(pos.1));
+    cx >= mx && cx < mx + i64::from(size.0) && cy >= my && cy < my + i64::from(size.1)
+}
+
+fn portal_err(stage: &str, err: &ashpd::Error) -> CaptureError {
+    CaptureError::Portal(format!("{stage}: {}", describe_portal_error(err)))
+}
+
+fn describe_portal_error(err: &ashpd::Error) -> String {
+    match err {
+        ashpd::Error::Response(ResponseError::Cancelled)
+        | ashpd::Error::Portal(PortalError::Cancelled(_)) => format!(
+            "{err} — ScreenCast was cancelled or denied in the dialog, nothing is shared; run capture-test again and pick the WoW window"
+        ),
+        ashpd::Error::Portal(PortalError::NotAllowed(_)) => format!(
+            "{err} — ScreenCast denied by portal policy (permission store or sandbox); allow screen sharing for this app and retry"
+        ),
+        ashpd::Error::Response(ResponseError::Other) => format!(
+            "{err} — the compositor portal backend refused the request; check `journalctl --user -u xdg-desktop-portal -u 'xdg-desktop-portal-*'`"
+        ),
+        ashpd::Error::NoResponse => format!(
+            "{err} — the compositor portal backend never answered; restart xdg-desktop-portal and its backend"
+        ),
+        ashpd::Error::PortalNotFound(_) => format!("{err} — {MISSING_BACKEND}"),
+        _ if err.to_string().contains("ServiceUnknown") => format!("{err} — {MISSING_BACKEND}"),
+        _ => enrich_portal_error(&err.to_string()),
+    }
 }
 
 fn start_pipewire(
@@ -355,4 +445,82 @@ fn raw_buffer_to_frame(
     };
 
     Some(CaptureFrame::new(rgba, width, height))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ashpd::desktop::screencast::StreamBuilder;
+
+    fn wow_at(x: i32, y: i32) -> WindowHint {
+        WindowHint {
+            compositor: "hyprland".into(),
+            address: "0x1".into(),
+            title: "World of Warcraft".into(),
+            class: "wow.exe".into(),
+            x,
+            y,
+            width: 1920,
+            height: 1080,
+        }
+    }
+
+    fn monitor(x: i32, y: i32) -> PortalStream {
+        StreamBuilder::new(42)
+            .source_type(SourceType::Monitor)
+            .position((x, y))
+            .size((2560, 1440))
+            .build()
+    }
+
+    #[test]
+    fn cancelled_reads_as_denial() {
+        let msg = describe_portal_error(&ashpd::Error::Response(ResponseError::Cancelled));
+        assert!(msg.contains("cancelled or denied"));
+    }
+
+    #[test]
+    fn missing_portal_names_backends() {
+        let name = "org.freedesktop.portal.ScreenCast".try_into().unwrap();
+        let msg = describe_portal_error(&ashpd::Error::PortalNotFound(name));
+        assert!(msg.contains("xdg-desktop-portal-hyprland"));
+    }
+
+    #[test]
+    fn no_sources_is_missing_backend() {
+        let err = requested_sources(BitFlags::empty()).unwrap_err();
+        assert!(err.to_string().contains("compositor backend"));
+    }
+
+    #[test]
+    fn monitor_only_backend_still_requests_monitor() {
+        let s = requested_sources(SourceType::Monitor.into()).unwrap();
+        assert_eq!(s, BitFlags::from(SourceType::Monitor));
+    }
+
+    #[test]
+    fn empty_streams_is_denial() {
+        let err = pick_stream(&[], None).unwrap_err();
+        assert!(err.to_string().contains("denied"));
+    }
+
+    #[test]
+    fn wrong_monitor_is_rejected() {
+        let err = pick_stream(&[monitor(2560, 0)], Some(&wow_at(100, 100))).unwrap_err();
+        assert!(err.to_string().contains("multi-monitor"));
+    }
+
+    #[test]
+    fn monitor_containing_wow_is_accepted() {
+        let s = pick_stream(&[monitor(2560, 0)], Some(&wow_at(2700, 100))).unwrap();
+        assert_eq!(s.pipe_wire_node_id(), 42);
+    }
+
+    #[test]
+    fn window_stream_skips_geometry_check() {
+        let w = StreamBuilder::new(7)
+            .source_type(SourceType::Window)
+            .build();
+        assert!(pick_stream(&[w], Some(&wow_at(-9999, -9999))).is_ok());
+    }
 }

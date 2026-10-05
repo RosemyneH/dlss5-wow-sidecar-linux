@@ -7,7 +7,7 @@ description = "Transparent overlay window for presenting upscaled RGBA frames ov
 
 [features]
 default = []
-layer-shell = ["dep:smithay-client-toolkit", "dep:wayland-client"]
+layer-shell = ["dep:smithay-client-toolkit", "dep:wayland-client", "dep:rustix"]
 
 [dependencies]
 sidecar-core = { path = "../sidecar-core" }
@@ -17,3 +17,7 @@ tracing.workspace = true
 winit = { version = "0.30", default-features = true, features = ["rwh_06", "x11", "wayland"] }
 smithay-client-toolkit = { version = "0.19", optional = true, default-features = false, features = ["calloop"] }
 wayland-client = { version = "0.31", optional = true }
+rustix = { version = "1", optional = true, default-features = false, features = ["std", "event"] }
+
+[lints.clippy]
+large_enum_variant = "allow"

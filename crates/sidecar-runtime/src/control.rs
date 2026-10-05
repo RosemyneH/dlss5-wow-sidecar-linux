@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use sidecar_probes::query_gpu_memory;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use crate::pipeline::Pipeline;
 use crate::protocol::{ControlRequest, ControlResponse, SidecarCommand, SidecarStatus};
@@ -36,6 +36,21 @@ impl ControlServer {
         socket_path: std::path::PathBuf,
         handler: CommandHandler,
     ) -> anyhow::Result<Self> {
+        Self::build(socket_path, handler, false)
+    }
+
+    pub fn create_mock_at(
+        socket_path: std::path::PathBuf,
+        handler: CommandHandler,
+    ) -> anyhow::Result<Self> {
+        Self::build(socket_path, handler, true)
+    }
+
+    fn build(
+        socket_path: std::path::PathBuf,
+        handler: CommandHandler,
+        mock_capture: bool,
+    ) -> anyhow::Result<Self> {
         if socket_path.exists() {
             if client::ping_socket(&socket_path)? {
                 anyhow::bail!(
@@ -62,11 +77,16 @@ impl ControlServer {
         let overlay_visible = Arc::new(Mutex::new(true));
         let status = Arc::new(Mutex::new(status));
         let pipeline_stop = Arc::new(AtomicBool::new(false));
-        let pipeline = Arc::new(Mutex::new(Pipeline::new(
+        let pipeline = Pipeline::new(
             overlay_visible.clone(),
             status.clone(),
             pipeline_stop.clone(),
-        )));
+        );
+        let pipeline = Arc::new(Mutex::new(if mock_capture {
+            pipeline.with_mock_capture()
+        } else {
+            pipeline
+        }));
 
         Ok(Self {
             listener,
@@ -123,7 +143,9 @@ impl ControlServer {
     pub fn pump_once(&self) -> anyhow::Result<bool> {
         match self.listener.accept() {
             Ok((stream, _)) => {
-                self.handle_client(stream)?;
+                if let Err(e) = self.handle_client(stream) {
+                    warn!("control client dropped: {e:#}");
+                }
                 Ok(true)
             }
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => Ok(false),
@@ -133,11 +155,16 @@ impl ControlServer {
 
     fn handle_client(&self, stream: UnixStream) -> anyhow::Result<()> {
         stream.set_read_timeout(Some(Duration::from_secs(2)))?;
+        stream.set_write_timeout(Some(Duration::from_secs(2)))?;
         let mut reader = BufReader::new(&stream);
         let mut line = String::new();
         reader.read_line(&mut line)?;
-        let req: ControlRequest = serde_json::from_str(line.trim()).unwrap_or(ControlRequest::Ping);
-        let resp = self.dispatch(req);
+        let resp = match serde_json::from_str::<ControlRequest>(line.trim()) {
+            Ok(req) => self.dispatch(req),
+            Err(e) => ControlResponse::Error {
+                message: format!("malformed request: {e}"),
+            },
+        };
         let mut stream = reader.into_inner();
         writeln!(stream, "{}", serde_json::to_string(&resp)?)?;
         stream.flush()?;
