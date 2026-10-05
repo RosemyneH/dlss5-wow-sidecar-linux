@@ -198,7 +198,9 @@ impl LayerShellApp {
         buffer
             .attach_to(self.layer.wl_surface())
             .map_err(layer_shell_err)?;
-        self.layer.wl_surface().frame(qh, self.layer.wl_surface().clone());
+        self.layer
+            .wl_surface()
+            .frame(qh, self.layer.wl_surface().clone());
         self.layer.commit();
         self.dirty = false;
         Ok(())
@@ -354,13 +356,18 @@ impl LayerShellOverlayPresenter {
         let (globals, mut queue) = registry_queue_init(&conn).map_err(layer_shell_err)?;
         let qh = queue.handle();
 
-        let compositor =
-            CompositorState::bind(&globals, &qh).map_err(layer_shell_err)?;
+        let compositor = CompositorState::bind(&globals, &qh).map_err(layer_shell_err)?;
         let layer_shell = LayerShell::bind(&globals, &qh).map_err(layer_shell_err)?;
         let shm = Shm::bind(&globals, &qh).map_err(layer_shell_err)?;
 
-        let mut app =
-            LayerShellApp::new(&globals, &qh, &compositor, &layer_shell, shm, desktop.clone())?;
+        let mut app = LayerShellApp::new(
+            &globals,
+            &qh,
+            &compositor,
+            &layer_shell,
+            shm,
+            desktop.clone(),
+        )?;
         queue.roundtrip(&mut app).map_err(map_dispatch_err)?;
 
         Ok(Self { conn, queue, app })

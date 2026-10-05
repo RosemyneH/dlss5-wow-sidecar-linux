@@ -292,7 +292,11 @@ impl OverlayPresenter {
         #[cfg(feature = "layer-shell")]
         if layer_shell_backend_requested() {
             match LayerShellOverlayPresenter::for_desktop_window(desktop) {
-                Ok(p) => return Ok(Self { backend: OverlayBackend::LayerShell(p) }),
+                Ok(p) => {
+                    return Ok(Self {
+                        backend: OverlayBackend::LayerShell(p),
+                    })
+                }
                 Err(e) => warn!("layer-shell overlay unavailable, using winit: {e}"),
             }
         }
