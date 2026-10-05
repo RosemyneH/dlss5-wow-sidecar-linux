@@ -28,7 +28,13 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "WoW Sidecar Manager",
         options,
-        Box::new(|cc| Ok(Box::new(ManagerApp::new(cc)))),
+        Box::new(|cc| {
+            let app = ManagerApp::new(cc);
+            cc.egui_ctx.send_viewport_cmd(egui::ViewportCommand::Title(
+                tr(&app.config.language, Msg::AppTitle).to_string(),
+            ));
+            Ok(Box::new(app))
+        }),
     )
 }
 
@@ -42,13 +48,13 @@ enum Section {
 }
 
 impl Section {
-    fn label(self) -> &'static str {
+    fn label_i18n(self, lang: &str) -> &'static str {
         match self {
-            Section::Status => "Status",
-            Section::Setup => "Setup",
-            Section::Checks => "Checks",
-            Section::Tuning => "Tuning",
-            Section::Log => "Log",
+            Section::Status => tr(lang, Msg::SectionStatus),
+            Section::Setup => tr(lang, Msg::SectionSetup),
+            Section::Checks => tr(lang, Msg::SectionChecks),
+            Section::Tuning => tr(lang, Msg::SectionTuning),
+            Section::Log => tr(lang, Msg::SectionLog),
         }
     }
 
@@ -114,9 +120,10 @@ struct ManagerApp {
 }
 
 impl ManagerApp {
-    fn new(_cc: &eframe::CreationContext<'_>) -> Self {
+    fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let config_path = default_config_path();
         let (config, warnings) = load_config(&config_path);
+        apply_theme(&cc.egui_ctx, &config.theme);
         let mut app = Self {
             section: Section::Status,
             saved_snapshot: config.clone(),
@@ -299,7 +306,7 @@ impl ManagerApp {
             Ok(()) => {
                 self.saved_snapshot = self.config.clone();
                 self.mark_dirty(false);
-                self.status_message = "Settings saved.".to_string();
+                self.status_message = tr(&self.config.language, Msg::SettingsSaved).to_string();
                 self.log("settings saved");
             }
             Err(err) => {
@@ -311,7 +318,8 @@ impl ManagerApp {
 
     fn draw_nav(&mut self, ui: &mut egui::Ui) {
         ui.vertical(|ui| {
-            ui.heading("WoW Sidecar");
+            let lang = &self.config.language;
+            ui.heading(tr(lang, Msg::NavHeading));
             ui.label(format!("v{}", env!("CARGO_PKG_VERSION")));
             ui.add_space(8.0);
             for sec in Section::ALL {
@@ -319,7 +327,7 @@ impl ManagerApp {
                     continue;
                 }
                 let selected = self.section == sec;
-                let mut label = sec.label().to_string();
+                let mut label = sec.label_i18n(lang).to_string();
                 if sec == Section::Tuning && self.dirty {
                     label.push('*');
                 }
@@ -336,8 +344,16 @@ impl ManagerApp {
                 }
             }
             ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
-                ui.label("Language: en (fixed for now)");
-                ui.label(format!("Theme: {}", self.config.theme));
+                ui.label(format!(
+                    "{}: {}",
+                    tr(lang, Msg::ThemeLabel),
+                    themes::normalize_theme(&self.config.theme)
+                ));
+                ui.label(format!(
+                    "{}: {}",
+                    tr(lang, Msg::LanguageLabel),
+                    self.config.language
+                ));
                 ui.separator();
                 let wow_dot = if self.live.wow_running && self.live.wow_borderless {
                     egui::Color32::from_rgb(80, 180, 120)
@@ -382,7 +398,7 @@ impl ManagerApp {
     }
 
     fn draw_status(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Status");
+        ui.heading(tr(&self.config.language, Msg::SectionStatus));
         self.draw_primary_overlay_button(ui);
         ui.add_space(8.0);
         if !self.status_message.is_empty() {
@@ -505,7 +521,7 @@ impl ManagerApp {
     }
 
     fn draw_setup(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Setup");
+        ui.heading(tr(&self.config.language, Msg::SectionSetup));
         ui.label(
             "Required files sit next to the sidecar binary. Nothing here downloads \
              from the network — fetch artifacts yourself, then install them here.",
@@ -688,7 +704,7 @@ impl ManagerApp {
     }
 
     fn draw_checks(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Checks");
+        ui.heading(tr(&self.config.language, Msg::SectionChecks));
         ui.horizontal(|ui| {
             if ui.button("Refresh probes").clicked() {
                 self.refresh_probes();
@@ -728,10 +744,9 @@ impl ManagerApp {
     }
 
     fn draw_tuning(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Tuning");
-        ui.label(
-            "Presets adjust rendering settings only. Interface language stays English for now.",
-        );
+        let lang = &self.config.language;
+        ui.heading(tr(lang, Msg::SectionTuning));
+        ui.label(tr(lang, Msg::TuningPresetsHint));
         ui.add_space(6.0);
 
         let active = matching_preset(&self.config);
@@ -747,17 +762,20 @@ impl ManagerApp {
         }
 
         ui.separator();
-        if ui.checkbox(&mut self.config.show_hud, "Show HUD").changed() {
-            self.mark_dirty(true);
-        }
         if ui
-            .checkbox(&mut self.config.show_overlay, "Show overlay")
+            .checkbox(&mut self.config.show_hud, tr(lang, Msg::ShowHud))
             .changed()
         {
             self.mark_dirty(true);
         }
         if ui
-            .checkbox(&mut self.config.advanced_mode, "Advanced mode")
+            .checkbox(&mut self.config.show_overlay, tr(lang, Msg::ShowOverlay))
+            .changed()
+        {
+            self.mark_dirty(true);
+        }
+        if ui
+            .checkbox(&mut self.config.advanced_mode, tr(lang, Msg::AdvancedMode))
             .changed()
         {
             if !self.config.advanced_mode && self.section == Section::Log {
@@ -767,17 +785,37 @@ impl ManagerApp {
         }
 
         ui.horizontal(|ui| {
-            ui.label("Theme (stored; styling TBD):");
-            let mut theme = self.config.theme.clone();
+            ui.label(tr(lang, Msg::ThemeStoredLabel));
+            let mut theme = themes::normalize_theme(&self.config.theme).to_string();
             egui::ComboBox::from_id_salt("theme")
                 .selected_text(&theme)
                 .show_ui(ui, |ui| {
-                    for name in ["stormwind", "questlog", "dragonflight"] {
-                        ui.selectable_value(&mut theme, name.to_string(), name);
+                    for name in THEMES {
+                        ui.selectable_value(&mut theme, (*name).to_string(), *name);
                     }
                 });
             if theme != self.config.theme {
                 self.config.theme = theme;
+                apply_theme(ui.ctx(), &self.config.theme);
+                self.mark_dirty(true);
+            }
+        });
+
+        ui.horizontal(|ui| {
+            ui.label(tr(lang, Msg::LanguageLabel));
+            let mut language = self.config.language.clone();
+            egui::ComboBox::from_id_salt("language")
+                .selected_text(&language)
+                .show_ui(ui, |ui| {
+                    for tag in ["en", "ru"] {
+                        ui.selectable_value(&mut language, tag.to_string(), tag);
+                    }
+                });
+            if language != self.config.language {
+                self.config.language = language;
+                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Title(
+                    tr(&self.config.language, Msg::AppTitle).to_string(),
+                ));
                 self.mark_dirty(true);
             }
         });
@@ -808,12 +846,16 @@ impl ManagerApp {
 
         ui.add_space(8.0);
         ui.horizontal(|ui| {
-            if ui.button("Save settings").clicked() {
+            if ui.button(tr(lang, Msg::SaveSettings)).clicked() {
                 self.save_settings();
             }
-            if ui.button("Reload from disk").clicked() {
+            if ui.button(tr(lang, Msg::ReloadFromDisk)).clicked() {
                 let (cfg, warnings) = load_config(&self.config_path);
                 self.config = cfg;
+                apply_theme(ui.ctx(), &self.config.theme);
+                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Title(
+                    tr(&self.config.language, Msg::AppTitle).to_string(),
+                ));
                 self.saved_snapshot = self.config.clone();
                 self.mark_dirty(false);
                 for w in warnings {
@@ -827,12 +869,12 @@ impl ManagerApp {
             }
         });
         if self.dirty {
-            ui.colored_label(egui::Color32::YELLOW, "Unsaved changes.");
+            ui.colored_label(egui::Color32::YELLOW, tr(lang, Msg::UnsavedChanges));
         }
     }
 
     fn draw_log(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Log");
+        ui.heading(tr(&self.config.language, Msg::SectionLog));
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .stick_to_bottom(true)
