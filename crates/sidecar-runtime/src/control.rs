@@ -198,29 +198,6 @@ pub mod client {
         send_at(&control_socket_path(), command).unwrap_or(false)
     }
 
-    pub fn send_named(name: &str) -> anyhow::Result<bool> {
-        let cmd = SidecarCommand::from_cli_name(name)
-            .ok_or_else(|| anyhow::anyhow!("unknown command: {name}"))?;
-        if cmd.is_toggle() {
-            let visible = match cmd {
-                SidecarCommand::HideOverlay => read().map(|s| s.overlay_visible != 0).unwrap_or(true),
-                SidecarCommand::HideHud => read().map(|s| s.hud_visible != 0).unwrap_or(false),
-                _ => false,
-            };
-            let resolved = match cmd {
-                SidecarCommand::HideOverlay => {
-                    if visible { SidecarCommand::HideOverlay } else { SidecarCommand::ShowOverlay }
-                }
-                SidecarCommand::HideHud => {
-                    if visible { SidecarCommand::HideHud } else { SidecarCommand::ShowHud }
-                }
-                other => other,
-            };
-            return Ok(send(resolved));
-        }
-        Ok(send(cmd))
-    }
-
     pub fn send_at(path: &Path, command: SidecarCommand) -> anyhow::Result<bool> {
         match request_at(path, ControlRequest::Command { command })? {
             ControlResponse::Ack { ok } => Ok(ok),

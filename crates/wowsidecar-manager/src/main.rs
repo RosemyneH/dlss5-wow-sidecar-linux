@@ -50,11 +50,11 @@ enum Section {
 impl Section {
     fn label_i18n(self, lang: &str) -> &'static str {
         match self {
-            Section::Status => tr(lang, Msg::SectionStatus),
-            Section::Setup => tr(lang, Msg::SectionSetup),
-            Section::Checks => tr(lang, Msg::SectionChecks),
-            Section::Tuning => tr(lang, Msg::SectionTuning),
-            Section::Log => tr(lang, Msg::SectionLog),
+            Section::Status => tr(&lang, Msg::SectionStatus),
+            Section::Setup => tr(&lang, Msg::SectionSetup),
+            Section::Checks => tr(&lang, Msg::SectionChecks),
+            Section::Tuning => tr(&lang, Msg::SectionTuning),
+            Section::Log => tr(&lang, Msg::SectionLog),
         }
     }
 
@@ -317,9 +317,9 @@ impl ManagerApp {
     }
 
     fn draw_nav(&mut self, ui: &mut egui::Ui) {
+        let lang = self.config.language.clone();
         ui.vertical(|ui| {
-            let lang = &self.config.language;
-            ui.heading(tr(lang, Msg::NavHeading));
+            ui.heading(tr(&lang, Msg::NavHeading));
             ui.label(format!("v{}", env!("CARGO_PKG_VERSION")));
             ui.add_space(8.0);
             for sec in Section::ALL {
@@ -327,7 +327,7 @@ impl ManagerApp {
                     continue;
                 }
                 let selected = self.section == sec;
-                let mut label = sec.label_i18n(lang).to_string();
+                let mut label = sec.label_i18n(&lang).to_string();
                 if sec == Section::Tuning && self.dirty {
                     label.push('*');
                 }
@@ -346,12 +346,12 @@ impl ManagerApp {
             ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
                 ui.label(format!(
                     "{}: {}",
-                    tr(lang, Msg::ThemeLabel),
+                    tr(&lang, Msg::ThemeLabel),
                     themes::normalize_theme(&self.config.theme)
                 ));
                 ui.label(format!(
                     "{}: {}",
-                    tr(lang, Msg::LanguageLabel),
+                    tr(&lang, Msg::LanguageLabel),
                     self.config.language
                 ));
                 ui.separator();
@@ -744,9 +744,9 @@ impl ManagerApp {
     }
 
     fn draw_tuning(&mut self, ui: &mut egui::Ui) {
-        let lang = &self.config.language;
-        ui.heading(tr(lang, Msg::SectionTuning));
-        ui.label(tr(lang, Msg::TuningPresetsHint));
+        let lang = self.config.language.clone();
+        ui.heading(tr(&lang, Msg::SectionTuning));
+        ui.label(tr(&lang, Msg::TuningPresetsHint));
         ui.add_space(6.0);
 
         let active = matching_preset(&self.config);
@@ -763,19 +763,19 @@ impl ManagerApp {
 
         ui.separator();
         if ui
-            .checkbox(&mut self.config.show_hud, tr(lang, Msg::ShowHud))
+            .checkbox(&mut self.config.show_hud, tr(&lang, Msg::ShowHud))
             .changed()
         {
             self.mark_dirty(true);
         }
         if ui
-            .checkbox(&mut self.config.show_overlay, tr(lang, Msg::ShowOverlay))
+            .checkbox(&mut self.config.show_overlay, tr(&lang, Msg::ShowOverlay))
             .changed()
         {
             self.mark_dirty(true);
         }
         if ui
-            .checkbox(&mut self.config.advanced_mode, tr(lang, Msg::AdvancedMode))
+            .checkbox(&mut self.config.advanced_mode, tr(&lang, Msg::AdvancedMode))
             .changed()
         {
             if !self.config.advanced_mode && self.section == Section::Log {
@@ -785,7 +785,7 @@ impl ManagerApp {
         }
 
         ui.horizontal(|ui| {
-            ui.label(tr(lang, Msg::ThemeStoredLabel));
+            ui.label(tr(&lang, Msg::ThemeStoredLabel));
             let mut theme = themes::normalize_theme(&self.config.theme).to_string();
             egui::ComboBox::from_id_salt("theme")
                 .selected_text(&theme)
@@ -802,7 +802,7 @@ impl ManagerApp {
         });
 
         ui.horizontal(|ui| {
-            ui.label(tr(lang, Msg::LanguageLabel));
+            ui.label(tr(&lang, Msg::LanguageLabel));
             let mut language = self.config.language.clone();
             egui::ComboBox::from_id_salt("language")
                 .selected_text(&language)
@@ -846,10 +846,10 @@ impl ManagerApp {
 
         ui.add_space(8.0);
         ui.horizontal(|ui| {
-            if ui.button(tr(lang, Msg::SaveSettings)).clicked() {
+            if ui.button(tr(&lang, Msg::SaveSettings)).clicked() {
                 self.save_settings();
             }
-            if ui.button(tr(lang, Msg::ReloadFromDisk)).clicked() {
+            if ui.button(tr(&lang, Msg::ReloadFromDisk)).clicked() {
                 let (cfg, warnings) = load_config(&self.config_path);
                 self.config = cfg;
                 apply_theme(ui.ctx(), &self.config.theme);
@@ -869,7 +869,7 @@ impl ManagerApp {
             }
         });
         if self.dirty {
-            ui.colored_label(egui::Color32::YELLOW, tr(lang, Msg::UnsavedChanges));
+            ui.colored_label(egui::Color32::YELLOW, tr(&lang, Msg::UnsavedChanges));
         }
     }
 

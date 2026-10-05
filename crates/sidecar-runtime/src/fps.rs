@@ -17,6 +17,9 @@ impl FpsCounter {
         None
     }
     pub fn fps(&self) -> f64 { self.last_fps }
+    pub fn stub_pulse(&mut self) -> f64 {
+        if let Some(fps) = self.tick_frame() { fps } else { self.last_fps }
+    }
 }
 #[cfg(test)]
 mod tests {
