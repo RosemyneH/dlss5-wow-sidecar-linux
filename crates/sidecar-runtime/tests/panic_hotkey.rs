@@ -24,9 +24,9 @@ fn panic_hides_overlay_and_stops_pipeline() {
 
     assert!(send_at(&sock, SidecarCommand::ShowHud).unwrap());
     assert!(execute_panic_with(|cmd| send_at(&sock, cmd).unwrap()));
+    assert!(server.pipeline_stop_requested());
 
     for _ in 0..30 {
-        let _ = server.pump_once();
         if let Ok(Some(st)) = read_at(&sock) {
             if st.overlay_visible == 0 && st.hud_visible == 0 {
                 return;

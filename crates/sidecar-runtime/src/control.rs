@@ -273,7 +273,6 @@ pub mod client {
     }
 
     pub fn read() -> Option<SidecarStatus> {
-
         read_at(&control_socket_path()).ok().flatten()
     }
 
@@ -354,4 +353,7 @@ pub fn ensure_runtime_dir() -> anyhow::Result<()> {
     Ok(())
 }
 
-pub use client::{is_running, read, read_at, send, send_at, send_toggle, start_daemon, start_overlay, start_overlay_at, status, stop};
+pub use client::{
+    is_running, read, read_at, send, send_at, start_daemon, start_overlay, start_overlay_at,
+    status, stop,
+};
