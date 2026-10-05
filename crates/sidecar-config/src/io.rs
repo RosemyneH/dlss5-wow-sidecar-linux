@@ -24,7 +24,8 @@ pub fn load_config(path: &Path) -> (Config, Vec<String>) {
 
 pub fn save_config(path: &Path, config: &Config) -> Result<(), String> {
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| format!("could not create {}: {e}", parent.display()))?;
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("could not create {}: {e}", parent.display()))?;
     }
     let text = serialize_config(config);
     fs::write(path, text).map_err(|e| format!("could not write {}: {e}", path.display()))

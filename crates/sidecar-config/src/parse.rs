@@ -1,9 +1,9 @@
 use toml::Table;
 use toml::Value;
 
+use crate::config::{Config, NeuralSettings, UiRect};
 use crate::hotkey::normalize_hotkey_string;
 use crate::language::parse_language_tag;
-use crate::config::{Config, NeuralSettings, UiRect};
 
 const KNOWN_KEYS: &[&str] = &[
     "show_hud",
@@ -85,12 +85,7 @@ fn read_int(
     *target = clamped;
 }
 
-fn read_optional_strength(
-    root: &Table,
-    key: &str,
-    target: &mut f32,
-    warnings: &mut Vec<String>,
-) {
+fn read_optional_strength(root: &Table, key: &str, target: &mut f32, warnings: &mut Vec<String>) {
     let Some(node) = root.get(key) else {
         return;
     };
@@ -99,15 +94,14 @@ fn read_optional_strength(
         return;
     };
     let value = value as f32;
-    *target = if value < 0.0 { -1.0 } else { value.clamp(0.0, 4.0) };
+    *target = if value < 0.0 {
+        -1.0
+    } else {
+        value.clamp(0.0, 4.0)
+    };
 }
 
-fn read_hotkey(
-    table: &Table,
-    key: &str,
-    target: &mut String,
-    warnings: &mut Vec<String>,
-) {
+fn read_hotkey(table: &Table, key: &str, target: &mut String, warnings: &mut Vec<String>) {
     let Some(entry) = table.get(key) else {
         return;
     };
@@ -141,8 +135,18 @@ pub fn parse_config(text: &str) -> (Config, Vec<String>) {
     };
 
     read_bool(&root, "show_hud", &mut config.show_hud, &mut warnings);
-    read_bool(&root, "advanced_mode", &mut config.advanced_mode, &mut warnings);
-    read_bool(&root, "show_overlay", &mut config.show_overlay, &mut warnings);
+    read_bool(
+        &root,
+        "advanced_mode",
+        &mut config.advanced_mode,
+        &mut warnings,
+    );
+    read_bool(
+        &root,
+        "show_overlay",
+        &mut config.show_overlay,
+        &mut warnings,
+    );
 
     if let Some(node) = root.get("flow_grid_size") {
         if let Some(value) = node.as_integer() {
@@ -219,9 +223,24 @@ pub fn parse_config(text: &str) -> (Config, Vec<String>) {
     }
 
     if let Some(Value::Table(table)) = root.get("hotkeys") {
-        read_hotkey(table, "toggle_overlay", &mut config.hotkeys.toggle_overlay, &mut warnings);
-        read_hotkey(table, "toggle_hud", &mut config.hotkeys.toggle_hud, &mut warnings);
-        read_hotkey(table, "start_stop", &mut config.hotkeys.start_stop, &mut warnings);
+        read_hotkey(
+            table,
+            "toggle_overlay",
+            &mut config.hotkeys.toggle_overlay,
+            &mut warnings,
+        );
+        read_hotkey(
+            table,
+            "toggle_hud",
+            &mut config.hotkeys.toggle_hud,
+            &mut warnings,
+        );
+        read_hotkey(
+            table,
+            "start_stop",
+            &mut config.hotkeys.start_stop,
+            &mut warnings,
+        );
     } else if root.contains_key("hotkeys") {
         warnings.push("hotkeys: expected a table; keeping the defaults".to_string());
     }
@@ -243,7 +262,14 @@ pub fn parse_config(text: &str) -> (Config, Vec<String>) {
 
     if root.contains_key("ui_mask_feather") {
         let mut feather = config.ui_mask_feather as i32;
-        read_int(&root, "ui_mask_feather", &mut feather, 0, 256, &mut warnings);
+        read_int(
+            &root,
+            "ui_mask_feather",
+            &mut feather,
+            0,
+            256,
+            &mut warnings,
+        );
         config.ui_mask_feather = feather as u32;
     }
 
@@ -257,7 +283,10 @@ pub fn parse_config(text: &str) -> (Config, Vec<String>) {
                 left: entry.get("left").and_then(|v| v.as_integer()).unwrap_or(0) as i32,
                 top: entry.get("top").and_then(|v| v.as_integer()).unwrap_or(0) as i32,
                 right: entry.get("right").and_then(|v| v.as_integer()).unwrap_or(0) as i32,
-                bottom: entry.get("bottom").and_then(|v| v.as_integer()).unwrap_or(0) as i32,
+                bottom: entry
+                    .get("bottom")
+                    .and_then(|v| v.as_integer())
+                    .unwrap_or(0) as i32,
             };
             config.ui_mask_rects.push(rect);
         }
@@ -284,9 +313,30 @@ pub fn parse_config(text: &str) -> (Config, Vec<String>) {
 fn read_neural(table: &Table, n: &mut NeuralSettings, warnings: &mut Vec<String>) {
     read_int(table, "enable_hooks", &mut n.enable_hooks, 0, 2, warnings);
     read_float(table, "intensity", &mut n.intensity, 0.0, 1.0, warnings);
-    read_float(table, "color_strength", &mut n.color_strength, 0.0, 1.0, warnings);
-    read_float(table, "transfer_strength", &mut n.transfer_strength, 0.0, 1.0, warnings);
-    read_float(table, "paper_white_scale", &mut n.paper_white_scale, 0.0, 10.0, warnings);
+    read_float(
+        table,
+        "color_strength",
+        &mut n.color_strength,
+        0.0,
+        1.0,
+        warnings,
+    );
+    read_float(
+        table,
+        "transfer_strength",
+        &mut n.transfer_strength,
+        0.0,
+        1.0,
+        warnings,
+    );
+    read_float(
+        table,
+        "paper_white_scale",
+        &mut n.paper_white_scale,
+        0.0,
+        10.0,
+        warnings,
+    );
     read_int(table, "preset", &mut n.preset, 0, 3, warnings);
     read_int(table, "style", &mut n.style, 0, 3, warnings);
     read_bool(table, "upscaling", &mut n.upscaling, warnings);

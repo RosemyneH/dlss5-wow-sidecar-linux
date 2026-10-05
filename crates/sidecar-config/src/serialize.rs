@@ -86,16 +86,8 @@ pub fn serialize_config(config: &Config) -> String {
     let _ = writeln!(out, "enable_hooks = {}", n.enable_hooks);
     let _ = writeln!(out, "intensity = {}", number(n.intensity));
     let _ = writeln!(out, "color_strength = {}", number(n.color_strength));
-    let _ = writeln!(
-        out,
-        "transfer_strength = {}",
-        number(n.transfer_strength)
-    );
-    let _ = writeln!(
-        out,
-        "paper_white_scale = {}",
-        number(n.paper_white_scale)
-    );
+    let _ = writeln!(out, "transfer_strength = {}", number(n.transfer_strength));
+    let _ = writeln!(out, "paper_white_scale = {}", number(n.paper_white_scale));
     let _ = writeln!(out, "preset = {}", n.preset);
     let _ = writeln!(out, "style = {}", n.style);
     let _ = writeln!(out, "upscaling = {}", boolean(n.upscaling));

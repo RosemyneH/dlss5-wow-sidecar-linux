@@ -1,0 +1,20 @@
+[package]
+name = "wowsidecar-manager"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "egui control panel for wowsidecar-linux"
+default-run = "wowsidecar-manager"
+
+[[bin]]
+name = "wowsidecar-manager"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+eframe = { version = "0.31", default-features = true }
+egui = "0.31"
+sidecar-config = { path = "../sidecar-config" }
+sidecar-core = { path = "../sidecar-core" }
+sidecar-probes = { path = "../sidecar-probes" }

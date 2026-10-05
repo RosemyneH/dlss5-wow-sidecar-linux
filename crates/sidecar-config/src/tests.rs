@@ -154,7 +154,10 @@ fn full_round_trip() {
     assert_eq!(reread.ui_mask_feather, config.ui_mask_feather);
     assert_eq!(reread.neural.intensity, config.neural.intensity);
     assert_eq!(reread.neural.style, config.neural.style);
-    assert_eq!(reread.neural.paper_white_scale, config.neural.paper_white_scale);
+    assert_eq!(
+        reread.neural.paper_white_scale,
+        config.neural.paper_white_scale
+    );
     assert_eq!(reread.neural.skin_structure, config.neural.skin_structure);
     assert_eq!(reread.ui_mask_rects.len(), 1);
     assert_eq!(reread.ui_mask_rects[0].bottom, 1080);
