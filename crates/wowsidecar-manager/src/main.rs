@@ -50,11 +50,11 @@ enum Section {
 impl Section {
     fn label_i18n(self, lang: &str) -> &'static str {
         match self {
-            Section::Status => tr(&lang, Msg::SectionStatus),
-            Section::Setup => tr(&lang, Msg::SectionSetup),
-            Section::Checks => tr(&lang, Msg::SectionChecks),
-            Section::Tuning => tr(&lang, Msg::SectionTuning),
-            Section::Log => tr(&lang, Msg::SectionLog),
+            Section::Status => tr(lang, Msg::SectionStatus),
+            Section::Setup => tr(lang, Msg::SectionSetup),
+            Section::Checks => tr(lang, Msg::SectionChecks),
+            Section::Tuning => tr(lang, Msg::SectionTuning),
+            Section::Log => tr(lang, Msg::SectionLog),
         }
     }
 

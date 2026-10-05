@@ -30,13 +30,7 @@ pub fn tr(lang: &str, msg: Msg) -> &'static str {
                 "WoW Sidecar Manager"
             }
         }
-        Msg::NavHeading => {
-            if ru {
-                "WoW Sidecar"
-            } else {
-                "WoW Sidecar"
-            }
-        }
+        Msg::NavHeading => "WoW Sidecar",
         Msg::SectionStatus => {
             if ru {
                 "Статус"
