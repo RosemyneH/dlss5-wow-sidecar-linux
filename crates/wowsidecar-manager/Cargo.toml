@@ -17,4 +17,7 @@ eframe = { version = "0.31", default-features = true }
 egui = "0.31"
 sidecar-config = { path = "../sidecar-config" }
 sidecar-core = { path = "../sidecar-core" }
+sidecar-install = { path = "../sidecar-install" }
 sidecar-probes = { path = "../sidecar-probes" }
+sidecar-runtime = { path = "../sidecar-runtime" }
+rfd = "0.15"

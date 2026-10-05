@@ -1,14 +1,22 @@
+mod i18n;
+mod themes;
+
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
+use std::time::{Duration, Instant};
 
 use eframe::egui;
+use i18n::{Msg, tr};
+use themes::{apply_theme, THEMES};
 use sidecar_config::{
     apply_preset, default_config_path, load_config, matching_preset, reset_rendering_settings,
     save_config, sidecar_dir, Config, NeuralStrength, PRESETS,
 };
 use sidecar_core::{list_wow_windows, smart_scan_installs, SmartScanOptions, WowInstall};
+use sidecar_install::{install_component, setup_page_data, SetupPageData};
 use sidecar_probes::{run_all_probes, ProbeResult, ProbeState};
+use sidecar_runtime::{is_running, read, send, start_daemon, SidecarCommand, SidecarStatus};
 
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
@@ -53,6 +61,39 @@ impl Section {
     ];
 }
 
+struct LiveState {
+    wow_running: bool,
+    wow_borderless: bool,
+    wow_width: u32,
+    wow_height: u32,
+    overlay_running: bool,
+    status: Option<SidecarStatus>,
+}
+
+fn poll_live_state() -> LiveState {
+    let windows = list_wow_windows();
+    let wow = windows.first();
+    let mut live = LiveState {
+        wow_running: wow.is_some(),
+        wow_borderless: wow.map(|w| !w.fullscreen).unwrap_or(false),
+        wow_width: wow.map(|w| w.width).unwrap_or(0),
+        wow_height: wow.map(|w| w.height).unwrap_or(0),
+        overlay_running: is_running(),
+        status: None,
+    };
+    if live.overlay_running {
+        live.status = read();
+    }
+    live
+}
+
+fn daemon_exe_path() -> PathBuf {
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|d| d.join("wowsidecar-daemon")))
+        .unwrap_or_else(|| PathBuf::from("wowsidecar-daemon"))
+}
+
 struct ManagerApp {
     section: Section,
     config: Config,
@@ -65,6 +106,11 @@ struct ManagerApp {
     scan_busy: bool,
     scan_rx: Option<Receiver<Vec<WowInstall>>>,
     status_message: String,
+    live: LiveState,
+    setup: SetupPageData,
+    last_live_poll: Instant,
+    setup_message: String,
+    setup_message_is_error: bool,
 }
 
 impl ManagerApp {
@@ -83,6 +129,11 @@ impl ManagerApp {
             scan_busy: false,
             scan_rx: None,
             status_message: String::new(),
+            live: poll_live_state(),
+            setup: setup_page_data(&sidecar_dir()),
+            last_live_poll: Instant::now(),
+            setup_message: String::new(),
+            setup_message_is_error: false,
         };
         app.log(format!("config: {}", app.config_path.display()));
         for w in warnings {
@@ -106,7 +157,100 @@ impl ManagerApp {
 
     fn refresh_probes(&mut self) {
         self.probes = run_all_probes(&sidecar_dir(), &self.wow_dir_path());
-        self.log("probes refreshed");
+    }
+
+    fn refresh_setup(&mut self) {
+        self.setup = setup_page_data(&sidecar_dir());
+    }
+
+    fn poll_live_if_due(&mut self, ctx: &egui::Context) {
+        ctx.request_repaint_after(Duration::from_secs(1));
+        if self.last_live_poll.elapsed() >= Duration::from_secs(1) {
+            self.live = poll_live_state();
+            self.last_live_poll = Instant::now();
+        }
+    }
+
+    fn probes_blocked(&self) -> bool {
+        self.probes.iter().any(|p| p.state == ProbeState::Fail)
+    }
+
+    fn can_start_overlay(&self) -> bool {
+        !self.probes_blocked()
+            && self.live.wow_running
+            && self.setup.missing_required_components == 0
+    }
+
+    fn start_overlay(&mut self) {
+        if self.dirty {
+            self.save_settings();
+            if self.dirty {
+                return;
+            }
+        }
+        let daemon = daemon_exe_path();
+        if !daemon.is_file() {
+            self.status_message = format!(
+                "Missing {} — build with: cargo build -p sidecar-runtime",
+                daemon.display()
+            );
+            self.log(self.status_message.clone());
+            return;
+        }
+        match start_daemon(&daemon) {
+            Ok(()) => {
+                self.status_message = "Overlay started.".into();
+                self.log("overlay daemon start requested");
+                self.live = poll_live_state();
+            }
+            Err(err) => {
+                self.status_message = err.to_string();
+                self.log(format!("overlay start failed: {err}"));
+            }
+        }
+    }
+
+    fn stop_overlay(&mut self) {
+        if send(SidecarCommand::Stop) {
+            self.status_message = "Stop sent to overlay.".into();
+            self.log("overlay stop sent");
+        } else {
+            self.status_message = "Overlay did not answer (may already be stopping).".into();
+            self.log(self.status_message.clone());
+        }
+        self.live = poll_live_state();
+    }
+
+    fn draw_primary_overlay_button(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            if self.live.overlay_running {
+                if ui
+                    .button(egui::RichText::new("Stop overlay").strong())
+                    .clicked()
+                {
+                    self.stop_overlay();
+                }
+            } else {
+                let can_start = self.can_start_overlay();
+                ui.add_enabled_ui(can_start, |ui| {
+                    if ui
+                        .button(egui::RichText::new("Start overlay").strong())
+                        .clicked()
+                    {
+                        self.start_overlay();
+                    }
+                });
+                if !can_start {
+                    ui.label(
+                        egui::RichText::new(
+                            "Need WoW running, passing checks, and required sidecar files.",
+                        )
+                        .small()
+                        .weak(),
+                    );
+                }
+            }
+        });
     }
 
     fn mark_dirty(&mut self, dirty: bool) {
@@ -179,27 +323,156 @@ impl ManagerApp {
                 if sec == Section::Tuning && self.dirty {
                     label.push('*');
                 }
+                if (sec == Section::Setup && self.setup.missing_required_components > 0)
+                    || (sec == Section::Checks && self.probes_blocked())
+                {
+                    label.push('!');
+                }
                 if ui.selectable_label(selected, label).clicked() {
                     self.section = sec;
+                    if sec == Section::Setup {
+                        self.refresh_setup();
+                    }
                 }
             }
             ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
                 ui.label("Language: en (fixed for now)");
                 ui.label(format!("Theme: {}", self.config.theme));
+                ui.separator();
+                let wow_dot = if self.live.wow_running && self.live.wow_borderless {
+                    egui::Color32::from_rgb(80, 180, 120)
+                } else if self.live.wow_running {
+                    egui::Color32::from_rgb(220, 180, 60)
+                } else {
+                    egui::Color32::GRAY
+                };
+                ui.horizontal(|ui| {
+                    ui.colored_label(wow_dot, "●");
+                    ui.label(if self.live.wow_running {
+                        if self.live.wow_borderless {
+                            "WoW: borderless/windowed"
+                        } else {
+                            "WoW: fullscreen"
+                        }
+                    } else {
+                        "WoW: not running"
+                    });
+                });
+                if self.live.wow_running {
+                    ui.label(format!(
+                        "   {}x{}",
+                        self.live.wow_width, self.live.wow_height
+                    ));
+                }
+                let overlay_dot = if self.live.overlay_running {
+                    egui::Color32::from_rgb(80, 180, 120)
+                } else {
+                    egui::Color32::GRAY
+                };
+                ui.horizontal(|ui| {
+                    ui.colored_label(overlay_dot, "●");
+                    ui.label(if self.live.overlay_running {
+                        "Overlay: running"
+                    } else {
+                        "Overlay: stopped"
+                    });
+                });
             });
         });
     }
 
     fn draw_status(&mut self, ui: &mut egui::Ui) {
         ui.heading("Status");
-        ui.label(
-            "Out-of-process sidecar for Linux (Hyprland / Sway). The overlay runtime is not \
-             wired yet; this panel loads settings and runs safety checks.",
-        );
+        self.draw_primary_overlay_button(ui);
         ui.add_space(8.0);
         if !self.status_message.is_empty() {
             ui.colored_label(egui::Color32::LIGHT_GREEN, &self.status_message);
         }
+        ui.separator();
+
+        ui.strong("Live");
+        ui.add_space(4.0);
+        if let Some(s) = self.live.status.clone() {
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| {
+                    ui.label("Overlay FPS");
+                    ui.strong(format!("{:.0}", s.fps));
+                });
+                ui.add_space(24.0);
+                ui.vertical(|ui| {
+                    ui.label("Capture FPS");
+                    ui.strong(format!("{:.0}", s.capture_fps));
+                });
+                ui.add_space(24.0);
+                ui.vertical(|ui| {
+                    ui.label("Latency p50");
+                    ui.strong(format!("{:.2} ms", s.p50_ms));
+                });
+                ui.add_space(24.0);
+                ui.vertical(|ui| {
+                    ui.label("Latency p99");
+                    ui.strong(format!("{:.2} ms", s.p99_ms));
+                });
+            });
+            if s.width > 0 && s.height > 0 {
+                ui.label(format!("Pipeline: {}x{}", s.width, s.height));
+            }
+            ui.label(format!(
+                "Variant: {} | pass: {}",
+                s.runtime_variant, s.pass_name
+            ));
+            if !s.last_error.is_empty() {
+                ui.colored_label(egui::Color32::LIGHT_RED, &s.last_error);
+            }
+
+            ui.add_space(8.0);
+            let visible = s.overlay_visible != 0;
+            let hud_up = s.hud_visible != 0;
+            let mut toggle_overlay = false;
+            let mut toggle_hud = false;
+            ui.horizontal(|ui| {
+                if ui
+                    .button(if visible {
+                        "Hide overlay (A/B compare)"
+                    } else {
+                        "Show overlay"
+                    })
+                    .clicked()
+                {
+                    toggle_overlay = true;
+                }
+                if ui
+                    .button(if hud_up { "Hide HUD" } else { "Show HUD" })
+                    .clicked()
+                {
+                    toggle_hud = true;
+                }
+            });
+            if toggle_overlay {
+                let cmd = if visible {
+                    SidecarCommand::HideOverlay
+                } else {
+                    SidecarCommand::ShowOverlay
+                };
+                let _ = send(cmd);
+                self.live = poll_live_state();
+            }
+            if toggle_hud {
+                let cmd = if hud_up {
+                    SidecarCommand::HideHud
+                } else {
+                    SidecarCommand::ShowHud
+                };
+                let _ = send(cmd);
+                self.live = poll_live_state();
+            }
+        } else if self.live.overlay_running {
+            ui.label("Overlay is running but status is not available yet.");
+        } else {
+            ui.label("Start the overlay to see live FPS and latency.");
+        }
+
+        ui.add_space(12.0);
         ui.separator();
         ui.label(format!("Config: {}", self.config_path.display()));
         ui.label(format!(
@@ -210,18 +483,21 @@ impl ManagerApp {
                 self.config.wow_dir.clone()
             }
         ));
-        let windows = list_wow_windows();
-        ui.label(format!("WoW windows: {}", windows.len()));
+        ui.label(format!("WoW windows: {}", list_wow_windows().len()));
         ui.label(format!(
             "Installs on disk (last scan): {}",
             self.installs.len()
         ));
 
-        let blocked = self.probes.iter().any(|p| p.state == ProbeState::Fail);
-        if blocked {
+        if self.probes_blocked() {
             ui.colored_label(
                 egui::Color32::LIGHT_RED,
                 "Some checks failed. Open Checks before expecting capture to work.",
+            );
+        } else if self.setup.missing_required_components > 0 {
+            ui.colored_label(
+                egui::Color32::LIGHT_RED,
+                "Required sidecar files missing. Open Setup.",
             );
         } else {
             ui.colored_label(egui::Color32::LIGHT_GREEN, "No blocking check failures.");
@@ -230,6 +506,119 @@ impl ManagerApp {
 
     fn draw_setup(&mut self, ui: &mut egui::Ui) {
         ui.heading("Setup");
+        ui.label(
+            "Required files sit next to the sidecar binary. Nothing here downloads \
+             from the network — fetch artifacts yourself, then install them here.",
+        );
+        ui.add_space(8.0);
+
+        ui.strong("Required files");
+        let component_rows: Vec<_> = self.setup.components.clone();
+        for row in component_rows {
+            let c = row.component.clone();
+            let present = row.present;
+            ui.group(|ui| {
+                ui.horizontal(|ui| {
+                    let color = if present {
+                        egui::Color32::from_rgb(80, 180, 120)
+                    } else if c.required {
+                        egui::Color32::from_rgb(220, 90, 90)
+                    } else {
+                        egui::Color32::from_rgb(220, 180, 60)
+                    };
+                    ui.colored_label(
+                        color,
+                        if present {
+                            "INSTALLED"
+                        } else if c.required {
+                            "MISSING"
+                        } else {
+                            "OPTIONAL"
+                        },
+                    );
+                    ui.strong(&c.title);
+                });
+                ui.label(&c.purpose);
+                ui.label(format!(
+                    "Wanted as {} | Source: {}",
+                    c.installed_as, c.source
+                ));
+                if ui
+                    .button(if present {
+                        "Replace…"
+                    } else {
+                        "Choose file…"
+                    })
+                    .clicked()
+                {
+                    if let Some(path) = rfd::FileDialog::new().pick_file() {
+                        let name = path
+                            .file_name()
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_default();
+                        if !sidecar_install::file_matches_component(&c, &name) {
+                            self.setup_message = format!(
+                                "{name} is not what this slot wants ({}).",
+                                c.installed_as
+                            );
+                            self.setup_message_is_error = true;
+                        } else {
+                            let result =
+                                install_component(&c, &path, &sidecar_dir());
+                            self.setup_message = result.message.clone();
+                            self.setup_message_is_error = !result.ok;
+                            if result.ok {
+                                self.log(self.setup_message.clone());
+                                self.refresh_setup();
+                                self.refresh_probes();
+                            }
+                        }
+                    }
+                }
+            });
+            ui.add_space(4.0);
+        }
+
+        if !self.setup_message.is_empty() {
+            let color = if self.setup_message_is_error {
+                egui::Color32::LIGHT_RED
+            } else {
+                egui::Color32::LIGHT_GREEN
+            };
+            ui.colored_label(color, &self.setup_message);
+        }
+
+        ui.add_space(12.0);
+        ui.strong("Runtime dependencies");
+        for dep_row in &self.setup.runtime_deps {
+            let d = &dep_row.dep;
+            ui.horizontal(|ui| {
+                let color = if dep_row.present {
+                    egui::Color32::from_rgb(80, 180, 120)
+                } else if d.required {
+                    egui::Color32::from_rgb(220, 90, 90)
+                } else {
+                    egui::Color32::from_rgb(220, 180, 60)
+                };
+                ui.colored_label(
+                    color,
+                    if dep_row.present { "OK" } else { "MISSING" },
+                );
+                ui.label(&d.title);
+            });
+            ui.label(&d.purpose);
+            ui.label(format!(
+                "Packages: {} | probe: {}",
+                d.packages_hint, d.probe_binary
+            ));
+            if let Some(ref path) = dep_row.probe_path {
+                ui.label(format!("Found: {path}"));
+            }
+        }
+
+        ui.add_space(16.0);
+        ui.separator();
+        ui.strong("WoW install folder");
         ui.horizontal(|ui| {
             let label = if self.scan_busy {
                 "Scanning…"
@@ -248,7 +637,7 @@ impl ManagerApp {
             ui.add_space(8.0);
             ui.label("Found installs (best first):");
             egui::ScrollArea::vertical()
-                .max_height(220.0)
+                .max_height(180.0)
                 .show(ui, |ui| {
                     let installs = self.installs.clone();
                     for (i, install) in installs.iter().enumerate() {
@@ -270,8 +659,8 @@ impl ManagerApp {
                 });
         }
 
-        ui.add_space(12.0);
-        ui.label("WoW game folder (for injector scan only — never install the sidecar here):");
+        ui.add_space(8.0);
+        ui.label("WoW game folder (injector scan only — never install the sidecar here):");
         let mut wow_dir = self.config.wow_dir.clone();
         if ui.text_edit_singleline(&mut wow_dir).changed() {
             self.config.wow_dir = wow_dir;
@@ -303,6 +692,7 @@ impl ManagerApp {
         ui.horizontal(|ui| {
             if ui.button("Refresh probes").clicked() {
                 self.refresh_probes();
+                self.log("probes refreshed");
             }
         });
         ui.add_space(6.0);
@@ -457,6 +847,7 @@ impl ManagerApp {
 impl eframe::App for ManagerApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.poll_scan();
+        self.poll_live_if_due(ctx);
 
         egui::SidePanel::left("nav")
             .resizable(false)
@@ -470,9 +861,5 @@ impl eframe::App for ManagerApp {
             Section::Tuning => self.draw_tuning(ui),
             Section::Log => self.draw_log(ui),
         });
-
-        if self.dirty && self.config != self.saved_snapshot {
-            // keep dirty flag in sync if user edited via presets etc.
-        }
     }
 }
