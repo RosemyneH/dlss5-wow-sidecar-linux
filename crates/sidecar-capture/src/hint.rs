@@ -69,7 +69,7 @@ pub fn identifier_matches_hint(hint: &WindowHint, identifier: &str) -> bool {
         return true;
     }
 
-    if id.contains(&hint.address) {
+    if !hint.address.is_empty() && id.contains(&hint.address) {
         return true;
     }
 
@@ -275,6 +275,12 @@ mod tests {
         assert!(hyprland_addresses_equal("0x1a2b", "1A2B"));
         assert!(hyprland_addresses_equal("0x1a2b", "0x1a2b"));
         assert!(!hyprland_addresses_equal("0x1a2b", "0x1a2c"));
+    }
+
+    #[test]
+    fn identifier_empty_address_never_matches_via_substring() {
+        let hint = empty_hint_with_address("sway", "");
+        assert!(!identifier_matches_hint(&hint, "object.serial=42"));
     }
 
     #[test]
