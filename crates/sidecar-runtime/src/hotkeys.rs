@@ -100,7 +100,10 @@ fn run_evdev(stop_flag: Arc<Mutex<bool>>, bindings: HotkeyBindings) -> anyhow::R
     }
     info!("evdev hotkeys active ({} devices)", devices.len());
 
-    let panic = bindings.panic_combo.as_deref().unwrap_or("Ctrl+Alt+Backspace");
+    let panic = bindings
+        .panic_combo
+        .as_deref()
+        .unwrap_or("Ctrl+Alt+Backspace");
     let toggle_overlay = bindings.toggle_overlay.as_deref();
     let toggle_hud = bindings.toggle_hud.as_deref();
     let start_stop = bindings.start_stop.as_deref();
@@ -239,6 +242,10 @@ mod tests {
         let mut pressed = HashSet::new();
         pressed.insert(KeyCode::KEY_LEFTCTRL);
         pressed.insert(KeyCode::KEY_LEFTALT);
-        assert!(combo_matches("Ctrl+Alt+Backspace", &pressed, KeyCode::KEY_BACKSPACE));
+        assert!(combo_matches(
+            "Ctrl+Alt+Backspace",
+            &pressed,
+            KeyCode::KEY_BACKSPACE
+        ));
     }
 }

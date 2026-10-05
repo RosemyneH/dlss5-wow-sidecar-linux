@@ -31,7 +31,10 @@ fn pipeline_start_mock_frames_and_overlay_visibility() {
         }
         thread::sleep(Duration::from_millis(20));
     }
-    assert!(frames >= 3, "pipeline should advance frames with mock capture");
+    assert!(
+        frames >= 3,
+        "pipeline should advance frames with mock capture"
+    );
 
     assert!(send_at(&sock, SidecarCommand::HideOverlay).unwrap());
     let mut hidden = 0u32;

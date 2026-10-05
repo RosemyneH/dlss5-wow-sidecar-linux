@@ -11,8 +11,8 @@
 | 5 | P11 | Neural chain parity with Windows presets (pass counts) | sidecar-neural |
 | 6 | P11 | Doctor/manager neural backend visibility | sidecar-neural + manager |
 | 7 | P02 | Hypr/Sway discovery = HWND equivalent; PARITY `yes` | sidecar-core |
-| 8 | — | `wowsidecar-manager` clippy `-D warnings` | wowsidecar-manager |
+| 8 | — | `wowsidecar-manager` clippy `-D warnings` — **done** | wowsidecar-manager |
 | 9 | — | Runtime pipeline + mock capture hardening | sidecar-runtime |
-| 10 | — | Workspace clippy CI + `PARITY.md` rows | repo root |
+| 10 | — | Workspace clippy CI + `PARITY.md` rows — **done** | repo root |
 
 After each wave: `cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings`

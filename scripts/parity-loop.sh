@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Gate for multi-agent parity: test, print status, fail while P06–P16 are open.
+# Gate for multi-agent parity: CI checks, test, print status, fail while P06–P16 are open.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MAX_ROUNDS="${1:-10}"
@@ -15,7 +15,8 @@ open_p06_p16() {
 
 for round in $(seq 1 "$MAX_ROUNDS"); do
   echo "=== parity loop round $round / $MAX_ROUNDS ==="
-  cargo test --workspace
+  cargo clippy --workspace --all-targets --locked -- -D warnings
+  cargo test --workspace --locked
   "$ROOT/scripts/parity-status.sh"
   open="$(open_p06_p16)"
   if [[ -z "$open" ]]; then

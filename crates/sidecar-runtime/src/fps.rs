@@ -10,7 +10,10 @@ pub struct FpsCounter {
 
 impl FpsCounter {
     pub fn new(window: Duration) -> Self {
-        Self { window, ..Default::default() }
+        Self {
+            window,
+            ..Default::default()
+        }
     }
 
     pub fn tick_frame(&mut self) -> Option<f64> {

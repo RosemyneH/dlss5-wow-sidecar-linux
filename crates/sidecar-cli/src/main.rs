@@ -209,11 +209,7 @@ fn main() -> Result<()> {
                 println!("{}", serde_json::to_string_pretty(&st)?);
             } else {
                 let vram = if st.vram_budget_mb > 0 {
-                    format!(
-                        " vram={}/{}MiB",
-                        st.vram_used_mb,
-                        st.vram_budget_mb
-                    )
+                    format!(" vram={}/{}MiB", st.vram_used_mb, st.vram_budget_mb)
                 } else {
                     String::new()
                 };

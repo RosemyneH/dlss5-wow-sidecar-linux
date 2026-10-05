@@ -6,8 +6,8 @@ use tracing::debug;
 use crate::error::CaptureError;
 use crate::frame::CaptureFrame;
 use crate::hint::WindowHint;
-use crate::pw_node::resolve_capture_node_id;
 use crate::portal::{spawn_direct_pipewire_stream, spawn_portal_stream, PortalHandle};
+use crate::pw_node::resolve_capture_node_id;
 use crate::pw_record::{spawn_pw_record_stream, PwRecordHandle};
 
 enum BackendHandle {

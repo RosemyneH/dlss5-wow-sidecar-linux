@@ -82,7 +82,10 @@ pub fn pick_capture_node_from_candidates(
     }
 
     best.map(|(id, score)| {
-        debug!(node_id = id, score, "auto-selected PipeWire capture node from registry");
+        debug!(
+            node_id = id,
+            score, "auto-selected PipeWire capture node from registry"
+        );
         id
     })
 }
@@ -101,7 +104,12 @@ pub fn hint_match_score(hint: &WindowHint, props: &[(String, String)]) -> u32 {
 
     if !hint.title.is_empty() {
         let title = hint.title.to_ascii_lowercase();
-        for key in ["node.description", "node.name", "application.name", "app.name"] {
+        for key in [
+            "node.description",
+            "node.name",
+            "application.name",
+            "app.name",
+        ] {
             if let Some(v) = prop_value(props, key) {
                 if v.to_ascii_lowercase().contains(&title) {
                     score = score.max(500);
@@ -173,11 +181,12 @@ fn prop_value<'a>(props: &'a [(String, String)], key: &str) -> Option<&'a str> {
 fn enumerate_video_capture_nodes() -> Result<Vec<PwNodeCandidate>, String> {
     pw::init();
 
-    let mainloop =
-        pw::main_loop::MainLoopRc::new(None).map_err(|e| format!("main loop: {e}"))?;
+    let mainloop = pw::main_loop::MainLoopRc::new(None).map_err(|e| format!("main loop: {e}"))?;
     let context =
         pw::context::ContextRc::new(&mainloop, None).map_err(|e| format!("context: {e}"))?;
-    let core = context.connect_rc(None).map_err(|e| format!("connect: {e}"))?;
+    let core = context
+        .connect_rc(None)
+        .map_err(|e| format!("connect: {e}"))?;
     let registry = core.get_registry().map_err(|e| format!("registry: {e}"))?;
 
     let nodes: Rc<Cell<Vec<PwNodeCandidate>>> = Rc::new(Cell::new(Vec::new()));
@@ -206,7 +215,7 @@ fn enumerate_video_capture_nodes() -> Result<Vec<PwNodeCandidate>, String> {
             let props = global
                 .props
                 .as_ref()
-                .map(|dict| props_from_dict(dict.as_ref()))
+                .map(|dict| props_from_dict(dict))
                 .unwrap_or_default();
             if !is_video_capture_node(&props) {
                 return;
@@ -295,7 +304,10 @@ mod tests {
                 ]),
             },
         ];
-        assert_eq!(pick_capture_node_from_candidates(&hint, &candidates), Some(10));
+        assert_eq!(
+            pick_capture_node_from_candidates(&hint, &candidates),
+            Some(10)
+        );
     }
 
     #[test]
@@ -318,7 +330,10 @@ mod tests {
                 ("node.description", "Screen capture — World of Warcraft"),
             ]),
         }];
-        assert_eq!(pick_capture_node_from_candidates(&hint, &candidates), Some(77));
+        assert_eq!(
+            pick_capture_node_from_candidates(&hint, &candidates),
+            Some(77)
+        );
     }
 
     #[test]
@@ -338,6 +353,9 @@ mod tests {
             ("node.name", "xdpw-screen-capture-source"),
         ]);
         let candidates = [PwNodeCandidate { id: 5, props }];
-        assert_eq!(pick_capture_node_from_candidates(&hint, &candidates), Some(5));
+        assert_eq!(
+            pick_capture_node_from_candidates(&hint, &candidates),
+            Some(5)
+        );
     }
 }

@@ -7,8 +7,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use eframe::egui;
-use i18n::{Msg, tr};
-use themes::{apply_theme, THEMES};
+use i18n::{tr, Msg};
 use sidecar_config::{
     apply_preset, default_config_path, load_config, matching_preset, reset_rendering_settings,
     save_config, sidecar_dir, Config, NeuralStrength, PRESETS,
@@ -17,6 +16,7 @@ use sidecar_core::{list_wow_windows, smart_scan_installs, SmartScanOptions, WowI
 use sidecar_install::{install_component, setup_page_data, SetupPageData};
 use sidecar_probes::{run_all_probes, ProbeResult, ProbeState};
 use sidecar_runtime::{is_running, read, send, start_daemon, SidecarCommand, SidecarStatus};
+use themes::{apply_theme, THEMES};
 
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
@@ -436,8 +436,7 @@ impl ManagerApp {
             if s.vram_budget_mb > 0 {
                 ui.label(format!(
                     "VRAM: {} / {} MiB",
-                    s.vram_used_mb,
-                    s.vram_budget_mb
+                    s.vram_used_mb, s.vram_budget_mb
                 ));
             }
             ui.label(format!(
@@ -580,14 +579,11 @@ impl ManagerApp {
                             .map(|n| n.to_string_lossy().into_owned())
                             .unwrap_or_default();
                         if !sidecar_install::file_matches_component(&c, &name) {
-                            self.setup_message = format!(
-                                "{name} is not what this slot wants ({}).",
-                                c.installed_as
-                            );
+                            self.setup_message =
+                                format!("{name} is not what this slot wants ({}).", c.installed_as);
                             self.setup_message_is_error = true;
                         } else {
-                            let result =
-                                install_component(&c, &path, &sidecar_dir());
+                            let result = install_component(&c, &path, &sidecar_dir());
                             self.setup_message = result.message.clone();
                             self.setup_message_is_error = !result.ok;
                             if result.ok {
@@ -623,10 +619,7 @@ impl ManagerApp {
                 } else {
                     egui::Color32::from_rgb(220, 180, 60)
                 };
-                ui.colored_label(
-                    color,
-                    if dep_row.present { "OK" } else { "MISSING" },
-                );
+                ui.colored_label(color, if dep_row.present { "OK" } else { "MISSING" });
                 ui.label(&d.title);
             });
             ui.label(&d.purpose);

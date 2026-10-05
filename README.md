@@ -10,7 +10,8 @@ Windows reference: `~/Repos/dlss5-wow-sidecar`. Checklist: [docs/PARITY.md](docs
 
 ```bash
 ./scripts/parity-status.sh    # open items + build
-./scripts/parity-loop.sh 10   # test + fail until P06–P18 done (agent loop)
+./scripts/ci-check.sh         # same as GitHub Actions (fmt, clippy, test)
+./scripts/parity-loop.sh 10   # clippy + test + fail until P06–P16 done (agent loop)
 ```
 
 Ten parallel workstreams (config, probes, capture, overlay, runtime, neural, presets, manager UI, install, CI) each own a `crates/*` directory to reduce merge conflicts.
