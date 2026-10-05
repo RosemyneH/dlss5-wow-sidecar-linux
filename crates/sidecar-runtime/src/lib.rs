@@ -5,8 +5,8 @@ mod protocol;
 mod socket_path;
 
 pub use control::{
-    ensure_runtime_dir, is_running, read, read_at, run_daemon_loop, send, send_at, start_daemon,
-    status, stop, ControlServer,
+    ensure_runtime_dir, is_running, read, read_at, run_daemon_loop, send, send_at, send_named,
+    start_daemon, status, stop, ControlServer,
 };
 pub use fps::FpsCounter;
 pub use hotkeys::{spawn_hotkey_thread, HotkeyBindings};
