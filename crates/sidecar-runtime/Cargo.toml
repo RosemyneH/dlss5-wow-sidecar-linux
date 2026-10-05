@@ -13,10 +13,11 @@ name = "wowsidecar-daemon"
 path = "src/bin/wowsidecar-daemon.rs"
 
 [features]
-default = ["hotkeys-evdev-panic"]
+default = ["hotkeys-evdev-panic", "overlay-layer-shell"]
 hotkeys-evdev = ["dep:evdev"]
 hotkeys-evdev-panic = ["hotkeys-evdev"]
 hotkeys-evdev-full = ["hotkeys-evdev"]
+overlay-layer-shell = ["sidecar-overlay/layer-shell"]
 
 [dependencies]
 anyhow.workspace = true

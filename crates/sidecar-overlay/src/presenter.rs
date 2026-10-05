@@ -424,7 +424,7 @@ pub struct OverlayPresenter {
 impl OverlayPresenter {
     pub fn for_desktop_window(desktop: &DesktopWindow) -> Result<Self, OverlayError> {
         #[cfg(feature = "layer-shell")]
-        if layer_shell_backend_requested() {
+        if prefer_layer_shell_backend() {
             match LayerShellOverlayPresenter::for_desktop_window(desktop) {
                 Ok(p) => {
                     return Ok(Self {
@@ -496,10 +496,16 @@ impl OverlayPresenter {
 }
 
 #[cfg(feature = "layer-shell")]
-fn layer_shell_backend_requested() -> bool {
-    overlay_backend_env()
-        .map(|v| v == "layer-shell" || v == "layer_shell")
-        .unwrap_or(false)
+fn prefer_layer_shell_backend() -> bool {
+    match overlay_backend_env() {
+        None => true,
+        Some(v) if v == "layer-shell" || v == "layer_shell" => true,
+        Some(v) if v == "winit" || v == "default" || v == "0" || v == "false" => false,
+        Some(v) => {
+            warn!("unknown WOWSIDECAR_OVERLAY_BACKEND={v}; using winit");
+            false
+        }
+    }
 }
 
 #[cfg(feature = "layer-shell")]
