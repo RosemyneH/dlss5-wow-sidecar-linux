@@ -1,0 +1,17 @@
+[package]
+name = "sidecar-probes"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Linux environment and safety probes for the manager"
+
+[features]
+default = []
+nvml = []
+
+[dependencies]
+sidecar-core = { path = "../sidecar-core" }
+
+[dev-dependencies]
+tempfile = "3"
