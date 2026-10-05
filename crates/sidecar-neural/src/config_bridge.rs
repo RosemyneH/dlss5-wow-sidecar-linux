@@ -4,8 +4,11 @@ use sidecar_config::Config;
 
 use crate::{build_processor, FrameProcessor, NeuralBackend, ProcessError};
 
+pub const MAX_NEURAL_PASSES: u32 = 4;
+const CNN_E_SHARPEN_SCALE: f32 = 0.92;
+
 pub fn neural_pass_count(config: &Config) -> u32 {
-    config.neural_passes.clamp(1, 3)
+    config.neural_passes.clamp(1, MAX_NEURAL_PASSES)
 }
 
 pub fn neural_backend_from_config(config: &Config) -> NeuralBackend {
@@ -37,8 +40,7 @@ pub fn processor_id_for_config(config: &Config) -> &'static str {
 fn sharpen_amount_from_config(config: &Config) -> f32 {
     let intensity = config.neural.intensity.clamp(0.0, 2.0);
     match config.dlss_preset.as_str() {
-        "cnn-e" => (intensity * 0.92).clamp(0.0, 2.0),
-        "cnn-f" => intensity,
+        "cnn-e" => intensity * CNN_E_SHARPEN_SCALE,
         _ => intensity,
     }
 }

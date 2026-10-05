@@ -1,11 +1,23 @@
 # sidecar-neural
 
-CPU frame processors for wowsidecar-linux: map `sidecar.toml` neural settings to a `FrameProcessor`, optionally run **1–3** sharpen passes per RGBA frame.
+CPU frame processors for wowsidecar-linux: map `sidecar.toml` neural settings to a `FrameProcessor`, optionally run **1–4** sharpen passes per RGBA frame (same range `sidecar-config` accepts for `neural_passes`).
 
 ## API
 
 - `build_processor_from_config(&Config)` — `neural_pass`, `dlss_preset`, and `[neural]` knobs → `Passthrough`, `SimpleSharpen`, or ONNX (stub).
-- `process_frame(config, layout, input, output)` — runs the configured processor `neural_passes` times (clamped to 1–3).
+- `process_frame(config, layout, input, output)` — runs the configured processor `neural_passes` times (clamped to 1–4).
+- `NeuralChain::from_config` / `reload(&Config)` — cached chain for per-frame config reloads. `reload` returns `true` when the spec (backend + pass count) changed; the processor is rebuilt only when the backend changes, and a failed rebuild (e.g. missing ONNX model) keeps the previous chain active.
+
+## Windows presets
+
+| Preset | `neural_pass` / `dlss_preset` | Processor | Sharpen amount |
+|--------|-------------------------------|-----------|----------------|
+| Recommended | `reshade` / `cnn-f` | `simple_sharpen` | `intensity` (1.0) |
+| Softer | `reshade` / `cnn-f` | `simple_sharpen` | `intensity` (0.60) |
+| Most stable | `reshade` / `cnn-e` | `simple_sharpen` | `intensity × 0.92` (0.85 → 0.782) |
+| Off (A/B baseline) | `passthrough` | `passthrough` | — (identity at any pass count) |
+
+Pass count (`neural_passes`) is independent of the preset, as on Windows: manager strengths map 1/2/3 passes, and TOML may set 4.
 - `processor_id_for_config(&Config)` — stable id for doctor / status (`passthrough`, `simple_sharpen`, …).
 
 ## DLSS 5 gap (parity P11)
