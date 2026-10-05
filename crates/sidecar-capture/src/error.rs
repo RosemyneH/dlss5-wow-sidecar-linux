@@ -43,9 +43,7 @@ pub fn enrich_portal_error(raw: &str) -> String {
             "{raw} — approve the portal picker and choose a Window (Hyprland: install xdg-desktop-portal-hyprland)"
         );
     }
-    format!(
-        "{raw} — see docs/CAPTURE.md and `wowsidecar-linux doctor` (capture section)"
-    )
+    format!("{raw} — see docs/CAPTURE.md and `wowsidecar-linux doctor` (capture section)")
 }
 
 pub fn capture_error_remediation(err: &CaptureError) -> &'static str {

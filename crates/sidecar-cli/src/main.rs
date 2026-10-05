@@ -4,12 +4,12 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use sidecar_capture::{
-    capture_doctor_report, capture_error_remediation, format_doctor_line, parse_capture_node_from_env,
-    start_capture, wow_window_hint, CaptureError,
+    capture_doctor_report, capture_error_remediation, format_doctor_line,
+    parse_capture_node_from_env, start_capture, wow_window_hint, CaptureError,
 };
 use sidecar_config::{matching_preset, neural_strength_of, parse_config, PRESETS};
-use sidecar_neural::processor_id_for_config;
 use sidecar_core::{list_wow_windows, smart_scan_installs, SmartScanOptions};
+use sidecar_neural::processor_id_for_config;
 use sidecar_runtime::{control_socket_path, is_running, read, send, send_toggle, SidecarCommand};
 use tracing_subscriber::EnvFilter;
 
@@ -139,10 +139,7 @@ fn main() -> Result<()> {
                 .unwrap_or_else(|| format!("custom ({} passes)", cfg.neural_passes));
             println!(
                 "\nconfig: preset={} neural_backend={} neural_pass={} neural_passes={}",
-                preset_name,
-                backend,
-                cfg.neural_pass,
-                cfg.neural_passes
+                preset_name, backend, cfg.neural_pass, cfg.neural_passes
             );
             println!("neural strength: {}", strength);
             let neural_runtime = if is_running() {

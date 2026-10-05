@@ -52,15 +52,16 @@ pub fn capture_doctor_report() -> Vec<CaptureDoctorLine> {
     } else {
         lines.push(CaptureDoctorLine::fail(
             "wayland session",
-            format!(
-                "XDG_SESSION_TYPE={session}; need Wayland (or WAYLAND_DISPLAY) for ScreenCast"
-            ),
+            format!("XDG_SESSION_TYPE={session}; need Wayland (or WAYLAND_DISPLAY) for ScreenCast"),
         ));
     }
 
     match std::env::var("DBUS_SESSION_BUS_ADDRESS") {
         Ok(addr) if !addr.is_empty() => {
-            lines.push(CaptureDoctorLine::ok("session dbus", "DBUS_SESSION_BUS_ADDRESS set"));
+            lines.push(CaptureDoctorLine::ok(
+                "session dbus",
+                "DBUS_SESSION_BUS_ADDRESS set",
+            ));
         }
         _ if std::env::var("XDG_RUNTIME_DIR").is_ok() => {
             lines.push(CaptureDoctorLine::warn(

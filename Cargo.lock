@@ -4732,6 +4732,7 @@ dependencies = [
  "sidecar-capture",
  "sidecar-config",
  "sidecar-core",
+ "sidecar-neural",
  "sidecar-runtime",
  "tracing",
  "tracing-subscriber",
@@ -4748,6 +4749,7 @@ dependencies = [
  "sidecar-config",
  "sidecar-core",
  "sidecar-install",
+ "sidecar-neural",
  "sidecar-probes",
  "sidecar-runtime",
 ]

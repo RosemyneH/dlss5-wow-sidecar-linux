@@ -81,12 +81,9 @@ impl Pipeline {
         let force_mock = self.force_mock_capture;
 
         *guard = Some(thread::spawn(move || {
-            if let Err(e) = run_pipeline_loop(
-                overlay_visible,
-                status.clone(),
-                stop_requested,
-                force_mock,
-            ) {
+            if let Err(e) =
+                run_pipeline_loop(overlay_visible, status.clone(), stop_requested, force_mock)
+            {
                 warn!("pipeline exited: {e:#}");
                 status.lock().unwrap().last_error = e.to_string();
             }

@@ -12,9 +12,9 @@ use sidecar_config::{
     apply_preset, default_config_path, load_config, matching_preset, neural_strength_of,
     reset_rendering_settings, save_config, sidecar_dir, Config, NeuralStrength, PRESETS,
 };
-use sidecar_neural::processor_id_for_config;
 use sidecar_core::{list_wow_windows, smart_scan_installs, SmartScanOptions, WowInstall};
 use sidecar_install::{install_component, setup_page_data, SetupPageData};
+use sidecar_neural::processor_id_for_config;
 use sidecar_probes::{run_all_probes, ProbeResult, ProbeState};
 use sidecar_runtime::{is_running, read, send, start_daemon, SidecarCommand, SidecarStatus};
 use themes::{apply_theme, THEMES};
