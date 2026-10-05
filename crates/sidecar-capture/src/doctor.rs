@@ -424,4 +424,95 @@ mod tests {
         let lines = capture_doctor_report();
         assert!(lines.iter().any(|l| l.label == "smoke test"));
     }
+
+    const HYPRLAND_PORTAL: &str = "[portal]\nDBusName=org.freedesktop.impl.portal.desktop.hyprland\nInterfaces=org.freedesktop.impl.portal.Screenshot;org.freedesktop.impl.portal.ScreenCast;\nUseIn=wlroots;Hyprland;sway;\n";
+    const WLR_PORTAL: &str = "[portal]\nInterfaces=org.freedesktop.impl.portal.ScreenCast;\nUseIn=wlroots;sway;Hyprland;\n";
+    const GTK_PORTAL: &str =
+        "[portal]\nInterfaces=org.freedesktop.impl.portal.FileChooser;\nUseIn=gnome\n";
+
+    fn desktops(d: &str) -> Vec<String> {
+        vec![d.to_owned()]
+    }
+
+    fn window(fullscreen: bool) -> DesktopWindow {
+        DesktopWindow {
+            compositor: "hyprland".into(),
+            address: "0xabc".into(),
+            title: "World of Warcraft".into(),
+            class: "wow.exe".into(),
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1080,
+            fullscreen,
+        }
+    }
+
+    #[test]
+    fn parses_portal_descriptor() {
+        let b = parse_portal_file("hyprland", HYPRLAND_PORTAL);
+        assert!(b.screencast);
+        assert!(b.use_in.iter().any(|u| u == "Hyprland"));
+        assert!(!parse_portal_file("gtk", GTK_PORTAL).screencast);
+    }
+
+    #[test]
+    fn no_screencast_backend_fails() {
+        let line = screencast_backend_line(
+            &[parse_portal_file("gtk", GTK_PORTAL)],
+            &desktops("Hyprland"),
+        );
+        assert_eq!(line.level, CaptureDoctorLevel::Fail);
+    }
+
+    #[test]
+    fn backend_for_other_desktop_fails() {
+        let line = screencast_backend_line(
+            &[parse_portal_file("hyprland", HYPRLAND_PORTAL)],
+            &desktops("KDE"),
+        );
+        assert_eq!(line.level, CaptureDoctorLevel::Fail);
+        assert!(line.detail.contains("KDE"));
+    }
+
+    #[test]
+    fn wlr_only_on_hyprland_warns_monitor_only() {
+        let line = screencast_backend_line(
+            &[parse_portal_file("wlr", WLR_PORTAL)],
+            &desktops("hyprland"),
+        );
+        assert_eq!(line.level, CaptureDoctorLevel::Warn);
+        assert!(line.detail.contains("monitor-only"));
+    }
+
+    #[test]
+    fn hyprland_backend_is_ok() {
+        let backends = [
+            parse_portal_file("hyprland", HYPRLAND_PORTAL),
+            parse_portal_file("wlr", WLR_PORTAL),
+        ];
+        let line = screencast_backend_line(&backends, &desktops("Hyprland"));
+        assert_eq!(line.level, CaptureDoctorLevel::Ok);
+    }
+
+    #[test]
+    fn wow_window_states() {
+        assert_eq!(wow_window_line(&[]).level, CaptureDoctorLevel::Warn);
+        assert_eq!(
+            wow_window_line(&[window(false)]).level,
+            CaptureDoctorLevel::Ok
+        );
+        assert_eq!(
+            wow_window_line(&[window(true)]).level,
+            CaptureDoctorLevel::Warn
+        );
+        let many = wow_window_line(&[window(false), window(false)]);
+        assert!(many.detail.contains(ENV_CAPTURE_ADDRESS));
+    }
+
+    #[test]
+    fn multi_monitor_warns() {
+        assert_eq!(monitor_line(1).level, CaptureDoctorLevel::Ok);
+        assert_eq!(monitor_line(2).level, CaptureDoctorLevel::Warn);
+    }
 }
