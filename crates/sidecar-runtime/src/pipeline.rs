@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
@@ -195,6 +196,11 @@ fn run_pipeline_loop(
     let mut capture_fps = FpsCounter::new(Duration::from_secs(1));
     let mut overlay_fps = FpsCounter::new(Duration::from_secs(1));
     let mut last_overlay_on = initial_visible && config.show_overlay;
+    let mut overlay_rect = presenter
+        .as_ref()
+        .map_or((desktop.x, desktop.y, desktop.width, desktop.height), |p| {
+            p.desktop_geometry()
+        });
     let mut frames: u64 = 0;
     let mut drops: u64 = 0;
 
@@ -228,8 +234,12 @@ fn run_pipeline_loop(
                 frames += 1;
                 let mut presented = false;
                 if let Some(p) = presenter.as_mut() {
+                    sync_overlay_rect(p, &mut overlay_rect, frame.width, frame.height);
                     if overlay_on {
-                        if p.show_frame(&work, 0, 0, frame.width, frame.height).is_ok() {
+                        let (_, _, ow, oh) = overlay_rect;
+                        let (blit, bw, bh) =
+                            fit_to_overlay(&work, frame.width, frame.height, ow, oh);
+                        if p.show_frame(&blit, 0, 0, bw, bh).is_ok() {
                             overlay_fps.tick_frame();
                             presented = true;
                             if p.pump(Some(Duration::from_millis(0))).exit_code().is_some() {
@@ -273,6 +283,40 @@ fn run_pipeline_loop(
     Ok(())
 }
 
+type OverlayRect = (i32, i32, u32, u32);
+
+fn sync_overlay_rect(
+    presenter: &mut OverlayPresenter,
+    rect: &mut OverlayRect,
+    frame_w: u32,
+    frame_h: u32,
+) {
+    if (rect.2, rect.3) != (frame_w, frame_h) {
+        presenter.refresh_geometry();
+    }
+    let current = presenter.desktop_geometry();
+    if current != *rect {
+        info!(
+            "overlay rect: {},{} {}x{} -> {},{} {}x{}",
+            rect.0, rect.1, rect.2, rect.3, current.0, current.1, current.2, current.3
+        );
+        *rect = current;
+    }
+}
+
+fn fit_to_overlay(rgba: &[u8], fw: u32, fh: u32, ow: u32, oh: u32) -> (Cow<'_, [u8]>, u32, u32) {
+    let (w, h) = (fw.min(ow), fh.min(oh));
+    if (w, h) == (fw, fh) {
+        return (Cow::Borrowed(rgba), w, h);
+    }
+    let row = w as usize * 4;
+    let mut out = Vec::with_capacity(row * h as usize);
+    for src in rgba.chunks_exact(fw as usize * 4).take(h as usize) {
+        out.extend_from_slice(&src[..row]);
+    }
+    (Cow::Owned(out), w, h)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -301,5 +345,22 @@ mod tests {
         pipeline.stop();
         assert!(status.lock().unwrap().frames >= 3);
         assert!(status.lock().unwrap().capture_fps > 0.0);
+    }
+
+    #[test]
+    fn fit_to_overlay_borrows_when_frame_fits() {
+        let rgba = vec![7u8; 4 * 4 * 4];
+        let (out, w, h) = fit_to_overlay(&rgba, 4, 4, 8, 8);
+        assert!(matches!(out, Cow::Borrowed(_)));
+        assert_eq!((w, h), (4, 4));
+    }
+
+    #[test]
+    fn fit_to_overlay_crops_to_shrunk_overlay() {
+        let rgba: Vec<u8> = (0..4 * 3 * 4).map(|i| i as u8).collect();
+        let (out, w, h) = fit_to_overlay(&rgba, 4, 3, 2, 2);
+        assert_eq!((w, h), (2, 2));
+        assert_eq!(&out[..8], &rgba[..8]);
+        assert_eq!(&out[8..], &rgba[16..24]);
     }
 }
