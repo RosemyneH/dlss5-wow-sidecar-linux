@@ -2,6 +2,9 @@ use std::num::NonZeroU32;
 use std::rc::Rc;
 use std::time::Duration;
 
+use crate::geometry::{poll_tracked_wow_geometry, GeometrySync};
+use crate::pump::OverlayPumpOutcome;
+
 use sidecar_core::DesktopWindow;
 use softbuffer::{Context, Surface};
 use thiserror::Error;
@@ -12,7 +15,7 @@ use winit::dpi::PhysicalSize;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, EventLoop, OwnedDisplayHandle};
 use winit::platform::pump_events::{EventLoopExtPumpEvents, PumpStatus};
-use winit::window::{Window, WindowId};
+use winit::window::{Fullscreen, Window, WindowId, WindowLevel};
 
 #[derive(Debug, Error)]
 pub enum OverlayError {
@@ -56,6 +59,7 @@ struct OverlayApp {
     backing: Vec<u32>,
     pending: Option<PendingFrame>,
     dirty: bool,
+    visible: bool,
 }
 
 impl OverlayApp {
@@ -69,6 +73,14 @@ impl OverlayApp {
             backing: vec![0; len],
             pending: None,
             dirty: false,
+            visible: true,
+        }
+    }
+
+    fn set_visible(&mut self, visible: bool) {
+        self.visible = visible;
+        if let Some(window) = &self.window {
+            window.set_visible(visible);
         }
     }
 
@@ -93,6 +105,21 @@ impl OverlayApp {
             window.request_redraw();
         }
         Ok(())
+    }
+
+    fn apply_desktop_geometry(&mut self, desktop: DesktopWindow) {
+        let size_changed =
+            self.desktop.width != desktop.width || self.desktop.height != desktop.height;
+        self.desktop = desktop;
+        if size_changed {
+            let len = self.desktop.width as usize * self.desktop.height as usize;
+            self.backing = vec![0; len];
+            self.dirty = true;
+        }
+        if let Some(window) = &self.window {
+            apply_window_chrome(window, &self.desktop);
+            window.request_redraw();
+        }
     }
 
     fn apply_pending(&mut self) {
@@ -144,6 +171,7 @@ impl ApplicationHandler for OverlayApp {
             .with_title("wow-sidecar-overlay")
             .with_transparent(true)
             .with_decorations(false)
+            .with_window_level(WindowLevel::AlwaysOnTop)
             .with_inner_size(PhysicalSize::new(self.desktop.width, self.desktop.height))
             .with_position(PhysicalPosition::new(self.desktop.x, self.desktop.y));
         let window = match event_loop.create_window(attrs) {
@@ -153,6 +181,7 @@ impl ApplicationHandler for OverlayApp {
                 return;
             }
         };
+        apply_window_chrome(&window, &self.desktop);
         let surface = match Surface::new(&self.context, window.clone()) {
             Ok(s) => s,
             Err(e) => {
@@ -160,6 +189,7 @@ impl ApplicationHandler for OverlayApp {
                 return;
             }
         };
+        window.set_visible(self.visible);
         self.window = Some(window);
         self.surface = Some(surface);
         if self.dirty {
@@ -209,8 +239,25 @@ impl OverlayPresenter {
         self.app.queue_frame(rgba, x, y, w, h)
     }
 
-    /// Drive the winit loop once. Returns [`PumpStatus::Exit`] when the overlay window is closed.
-    pub fn pump(&mut self, timeout: Option<Duration>) -> PumpStatus {
+    /// Reposition/resize the overlay from a fresh `list_wow_windows()` poll (same `address` as at creation).
+    pub fn refresh_geometry(&mut self) -> GeometrySync {
+        let (sync, updated) = poll_tracked_wow_geometry(&self.app.desktop);
+        if let Some(desktop) = updated {
+            self.app.apply_desktop_geometry(desktop);
+        }
+        sync
+    }
+
+    /// Drive the winit loop once: poll WoW geometry, then pump events.
+    pub fn pump(&mut self, timeout: Option<Duration>) -> OverlayPumpOutcome {
+        self.refresh_geometry();
+        OverlayPumpOutcome::from_pump_status(
+            self.event_loop.pump_app_events(timeout, &mut self.app),
+        )
+    }
+
+    /// Lower-level pump without compositor geometry polling.
+    pub fn pump_events_only(&mut self, timeout: Option<Duration>) -> PumpStatus {
         self.event_loop.pump_app_events(timeout, &mut self.app)
     }
 
@@ -221,6 +268,22 @@ impl OverlayPresenter {
             self.app.desktop.width,
             self.app.desktop.height,
         )
+    }
+
+    pub fn set_visible(&mut self, visible: bool) {
+        self.app.set_visible(visible);
+    }
+}
+
+fn apply_window_chrome(window: &Window, desktop: &DesktopWindow) {
+    window.set_window_level(WindowLevel::AlwaysOnTop);
+    let size = PhysicalSize::new(desktop.width, desktop.height);
+    let _ = window.request_inner_size(size);
+    window.set_outer_position(PhysicalPosition::new(desktop.x, desktop.y));
+    if desktop.fullscreen {
+        window.set_fullscreen(Some(Fullscreen::Borderless(None)));
+    } else {
+        window.set_fullscreen(None);
     }
 }
 
@@ -256,5 +319,11 @@ mod tests {
     fn show_frame_validates_byte_len() {
         let err = validate_frame_blit(64, 64, &[0u8; 8], 0, 0, 4, 4).expect_err("wrong size");
         assert!(matches!(err, OverlayError::FrameSize { .. }));
+    }
+
+    #[test]
+    fn show_frame_rejects_out_of_bounds_blit() {
+        let err = validate_frame_blit(64, 64, &[0u8; 64], 62, 62, 4, 4).expect_err("oob");
+        assert!(matches!(err, OverlayError::OutOfBounds { .. }));
     }
 }

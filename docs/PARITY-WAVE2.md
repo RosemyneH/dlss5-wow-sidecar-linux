@@ -5,7 +5,7 @@ Reference: `~/Repos/dlss5-wow-sidecar` v0.4. Goal: **end-to-end loop** in daemon
 | Agent | ID | Deliverable |
 |-------|-----|-------------|
 | 1 | P06 | Hyprland window capture hints; reduce portal friction; tests |
-| 2 | P07 | Overlay layer-shell / always-on-top; track `DesktopWindow` moves |
+| 2 | P07 | winit always-on-top + borderless over game rect; poll `list_wow_windows` for moves |
 | 3 | P08 | `sidecar-runtime` pipeline thread: capture stream + present |
 | 4 | P09 | Global hotkeys: portal GlobalShortcuts or documented Hypr binds + IPC |
 | 5 | P10 | Real `capture_fps` / `fps` in `SidecarStatus` from pipeline |
