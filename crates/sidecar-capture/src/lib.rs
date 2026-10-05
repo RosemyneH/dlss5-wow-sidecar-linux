@@ -6,7 +6,10 @@ mod portal;
 mod pw_record;
 mod stream;
 
-pub use mock::{synthetic_frame_4x4, synthetic_rgba_4x4, SYNTHETIC_H, SYNTHETIC_W};
+pub use mock::{
+    enable_mock_capture, mock_capture_enabled, mock_frame, synthetic_frame_4x4, synthetic_rgba_4x4,
+    MOCK_STREAM_H, MOCK_STREAM_W, SYNTHETIC_H, SYNTHETIC_W,
+};
 
 pub use error::CaptureError;
 pub use frame::CaptureFrame;
@@ -16,7 +19,7 @@ pub use hint::{
     parse_capture_node_value, pick_wow_hint, WindowHint, ENV_CAPTURE_ADDRESS, ENV_CAPTURE_HINT,
     ENV_CAPTURE_NODE,
 };
-pub use stream::FrameStream;
+pub use stream::{start_capture_or_mock, start_mock_stream, FrameStream};
 
 use sidecar_core::{list_wow_windows, DesktopWindow};
 

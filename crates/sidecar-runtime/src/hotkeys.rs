@@ -46,21 +46,12 @@ impl HotkeyBindings {
     }
 
     pub fn apply_evdev_default_policy(self) -> Self {
-        if cfg!(all(feature = "hotkeys-evdev-panic", not(feature = "hotkeys-evdev-full"))) {
-            Self {
-                start_stop: None,
-                toggle_overlay: None,
-                toggle_hud: None,
-                panic_combo: self.panic_combo,
-            }
-        } else {
-            self
-        }
+        self
     }
 }
 
 pub fn execute_panic() -> bool {
-    execute_panic_with(|cmd| send(cmd))
+    execute_panic_with(send)
 }
 
 pub fn execute_panic_with(send_cmd: impl Fn(SidecarCommand) -> bool) -> bool {
@@ -144,11 +135,9 @@ fn run_evdev(stop_flag: Arc<Mutex<bool>>, bindings: HotkeyBindings) -> anyhow::R
                         SidecarCommand::ShowHud
                     });
                 }
-                if combo_matches_opt(start_stop, &pressed, code) {
-                    if is_running() {
-                        let _ = send(SidecarCommand::Stop);
-                        *stop_flag.lock().unwrap() = true;
-                    }
+                if combo_matches_opt(start_stop, &pressed, code) && is_running() {
+                    let _ = send(SidecarCommand::Stop);
+                    *stop_flag.lock().unwrap() = true;
                 }
             }
         }

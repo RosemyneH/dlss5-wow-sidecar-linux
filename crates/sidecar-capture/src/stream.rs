@@ -53,6 +53,23 @@ impl Drop for FrameStream {
     }
 }
 
+pub fn start_capture_or_mock(window_hint: Option<WindowHint>) -> Result<FrameStream, CaptureError> {
+    if crate::mock::mock_capture_enabled() {
+        return Ok(start_mock_stream());
+    }
+    match start_capture(window_hint) {
+        Ok(stream) => Ok(stream),
+        Err(CaptureError::NotWayland(_)) => Ok(start_mock_stream()),
+        Err(e) => Err(e),
+    }
+}
+
+pub fn start_mock_stream() -> FrameStream {
+    let (tx, rx) = mpsc::channel();
+    crate::mock::spawn_mock_producer(tx);
+    FrameStream { rx, backend: None }
+}
+
 pub fn start_capture(window_hint: Option<WindowHint>) -> Result<FrameStream, CaptureError> {
     ensure_wayland()?;
 
