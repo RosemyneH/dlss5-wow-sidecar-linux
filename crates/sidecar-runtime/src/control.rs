@@ -2,12 +2,14 @@ use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+use sidecar_probes::query_gpu_memory;
 use tracing::{debug, info};
 
-use crate::fps::FpsCounter;
+use crate::pipeline::Pipeline;
 use crate::protocol::{ControlRequest, ControlResponse, SidecarCommand, SidecarStatus};
 use crate::socket_path::{control_socket_path, runtime_dir};
 
@@ -20,6 +22,8 @@ pub struct ControlServer {
     overlay_visible: Arc<Mutex<bool>>,
     hud_visible: Arc<Mutex<bool>>,
     stop_flag: Arc<Mutex<bool>>,
+    pipeline_stop: Arc<AtomicBool>,
+    pipeline: Arc<Mutex<Pipeline>>,
     handler: Arc<CommandHandler>,
 }
 
@@ -50,20 +54,48 @@ impl ControlServer {
 
         let status = SidecarStatus {
             process_id: std::process::id(),
-            runtime_variant: "linux-stub".into(),
-            pass_name: "stub".into(),
+            runtime_variant: "linux-pipeline".into(),
+            pass_name: "idle".into(),
             ..SidecarStatus::default()
         };
+
+        let overlay_visible = Arc::new(Mutex::new(true));
+        let status = Arc::new(Mutex::new(status));
+        let pipeline_stop = Arc::new(AtomicBool::new(false));
+        let pipeline = Arc::new(Mutex::new(Pipeline::new(
+            overlay_visible.clone(),
+            status.clone(),
+            pipeline_stop.clone(),
+        )));
 
         Ok(Self {
             listener,
             socket_path,
-            status: Arc::new(Mutex::new(status)),
-            overlay_visible: Arc::new(Mutex::new(true)),
+            status,
+            overlay_visible,
             hud_visible: Arc::new(Mutex::new(false)),
             stop_flag: Arc::new(Mutex::new(false)),
+            pipeline_stop,
+            pipeline,
             handler: Arc::new(handler),
         })
+    }
+
+    pub fn pipeline(&self) -> Arc<Mutex<Pipeline>> {
+        self.pipeline.clone()
+    }
+
+    pub fn pipeline_stop_requested(&self) -> bool {
+        self.pipeline_stop.load(Ordering::Acquire)
+    }
+
+    pub fn poll_vram_into_status(&self) {
+        let mut status = self.status.lock().unwrap();
+        if let Some(mem) = query_gpu_memory() {
+            status.vram_used_mb = mem.used_mb;
+            status.vram_budget_mb = mem.total_mb;
+            status.sequence = status.sequence.wrapping_add(1);
+        }
     }
 
     pub fn socket_path(&self) -> &Path {
@@ -86,16 +118,6 @@ impl ControlServer {
         status.overlay_visible = u32::from(*self.overlay_visible.lock().unwrap());
         status.hud_visible = u32::from(*self.hud_visible.lock().unwrap());
         *slot = status;
-    }
-
-    pub fn tick_fps_stubs(&self, capture: &mut FpsCounter, overlay: &mut FpsCounter) {
-        let capture_fps = capture.stub_pulse();
-        let overlay_fps = overlay.stub_pulse();
-        let mut status = self.status.lock().unwrap().clone();
-        status.capture_fps = capture_fps;
-        status.fps = overlay_fps;
-        status.frames = status.frames.saturating_add(1);
-        self.publish(status);
     }
 
     pub fn pump_once(&self) -> anyhow::Result<bool> {
@@ -128,8 +150,12 @@ impl ControlServer {
             ControlRequest::GetStatus | ControlRequest::Status => ControlResponse::Status {
                 status: self.status.lock().unwrap().clone(),
             },
-            ControlRequest::Start => ControlResponse::Ack { ok: true },
+            ControlRequest::Start => {
+                let ok = self.pipeline.lock().unwrap().start().is_ok();
+                ControlResponse::Ack { ok }
+            }
             ControlRequest::Stop => {
+                self.pipeline.lock().unwrap().stop();
                 let ok = self.apply_command(SidecarCommand::Stop);
                 ControlResponse::Ack { ok }
             }
@@ -145,12 +171,19 @@ impl ControlServer {
         match command {
             SidecarCommand::None => return true,
             SidecarCommand::Stop => {
+                self.pipeline.lock().unwrap().stop();
                 *self.stop_flag.lock().unwrap() = true;
             }
             SidecarCommand::ShowOverlay => *self.overlay_visible.lock().unwrap() = true,
             SidecarCommand::HideOverlay => *self.overlay_visible.lock().unwrap() = false,
             SidecarCommand::ShowHud => *self.hud_visible.lock().unwrap() = true,
             SidecarCommand::HideHud => *self.hud_visible.lock().unwrap() = false,
+            SidecarCommand::Panic => {
+                *self.overlay_visible.lock().unwrap() = false;
+                *self.hud_visible.lock().unwrap() = false;
+                self.pipeline_stop.store(true, Ordering::Release);
+                self.pipeline.lock().unwrap().stop();
+            }
         }
         self.sync_status_flags();
         (self.handler)(command);
@@ -196,6 +229,29 @@ pub mod client {
 
     pub fn send(command: SidecarCommand) -> bool {
         send_at(&control_socket_path(), command).unwrap_or(false)
+    }
+
+    pub fn send_toggle(command: SidecarCommand) -> bool {
+        let resolved = match command {
+            SidecarCommand::HideOverlay => {
+                let visible = read().map(|s| s.overlay_visible != 0).unwrap_or(true);
+                if visible {
+                    SidecarCommand::HideOverlay
+                } else {
+                    SidecarCommand::ShowOverlay
+                }
+            }
+            SidecarCommand::HideHud => {
+                let visible = read().map(|s| s.hud_visible != 0).unwrap_or(false);
+                if visible {
+                    SidecarCommand::HideHud
+                } else {
+                    SidecarCommand::ShowHud
+                }
+            }
+            other => other,
+        };
+        send(resolved)
     }
 
     pub fn send_at(path: &Path, command: SidecarCommand) -> anyhow::Result<bool> {
@@ -264,15 +320,19 @@ pub mod client {
 
 pub fn run_daemon_loop(server: &ControlServer) -> anyhow::Result<()> {
     info!("control socket: {}", server.socket_path().display());
-    let mut capture_fps = FpsCounter::new(Duration::from_secs(1));
-    let mut overlay_fps = FpsCounter::new(Duration::from_secs(1));
+    let _ = server.pipeline().lock().unwrap().start();
+    let mut last_vram_poll = Instant::now() - Duration::from_secs(10);
 
     while !server.should_stop() {
         while server.pump_once()? {}
-        server.tick_fps_stubs(&mut capture_fps, &mut overlay_fps);
+        if last_vram_poll.elapsed() >= Duration::from_secs(2) {
+            server.poll_vram_into_status();
+            last_vram_poll = Instant::now();
+        }
         std::thread::sleep(Duration::from_millis(16));
     }
 
+    server.pipeline().lock().unwrap().stop();
     info!("daemon stopping");
     Ok(())
 }
@@ -282,4 +342,4 @@ pub fn ensure_runtime_dir() -> anyhow::Result<()> {
     Ok(())
 }
 
-pub use client::{is_running, read, read_at, send, send_at, start_daemon, status, stop};
+pub use client::{is_running, read, read_at, send, send_at, send_toggle, start_daemon, status, stop};

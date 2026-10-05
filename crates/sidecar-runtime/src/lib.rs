@@ -5,11 +5,12 @@ mod protocol;
 mod socket_path;
 
 pub use control::{
-    ensure_runtime_dir, is_running, read, read_at, run_daemon_loop, send, send_at, start_daemon,
+    ensure_runtime_dir, is_running, read, read_at, run_daemon_loop, send, send_at, send_toggle, start_daemon,
     status, stop, ControlServer,
 };
 pub use fps::FpsCounter;
 pub use hotkeys::{spawn_hotkey_thread, HotkeyBindings};
+pub use pipeline::Pipeline;
 pub use protocol::{ControlRequest, ControlResponse, SidecarCommand, SidecarStatus};
 pub use socket_path::{
     control_socket_path, control_socket_path_in, runtime_dir, CONTROL_SOCKET_NAME, RUNTIME_DIR_NAME,
