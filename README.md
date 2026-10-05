@@ -23,7 +23,7 @@ Ten parallel workstreams (config, probes, capture, overlay, runtime, neural, pre
 | Find WoW window (Hyprland / Sway) | **Done** (`windows`) |
 | PipeWire / portal window capture | Planned |
 | Fullscreen overlay (Vulkan) | Planned |
-| DLSS 5–class neural pass on Linux | **Research** — no Windows `nvngx_*.dll`; see [docs/ROADMAP.md](docs/ROADMAP.md) |
+| DLSS 5–class neural pass on Linux | **Partial** — `sidecar-neural` CPU sharpen MVP; see gap below |
 
 ## Build & run
 
@@ -45,6 +45,17 @@ wowsidecar-linux scan --root /mnt/games
 ## Relation to the Windows sidecar
 
 The Windows app uses **Windows Graphics Capture** + **NGX on D3D11**. On Linux we target **xdg-desktop-portal screen cast** (per-window) and a **Vulkan** present path. True DLSS 5 neural rendering for arbitrary captured frames may require a different ML backend than NGX until NVIDIA exposes an equivalent off-game API on Linux.
+
+## Neural pass vs DLSS 5 (gap)
+
+| | Windows sidecar | `sidecar-neural` (Linux) |
+|--|-----------------|--------------------------|
+| Backend | NVIDIA NGX (DLSS 5) + ReShade chain | CPU **unsharp mask** (`SimpleSharpen`) or **Passthrough** |
+| Input | In-process D3D11 color (+ motion vectors in NGX path) | Planned: portal-captured **RGBA8** frames |
+| Quality | Temporal super-resolution, trained on game content | Spatial sharpen only; no motion, no AI reconstruction |
+| Future path | NGX updates on Windows | `OnnxProcessorConfig` / `OnnxRuntime` hook for ONNX Runtime; optional GPU compute shader later |
+
+Parity item **P11** is **partial** until capture feeds this crate and an inference backend matches NGX-class output. API entry point: `sidecar_neural::build_processor(NeuralBackend::…)`.
 
 ## License
 

@@ -32,8 +32,7 @@ fn title_or_class_looks_like_wow(title: &str, class: &str) -> bool {
         || t.contains("warcraft")
         || c.contains("wow")
         || c.contains("gxwindow")
-        || c.contains("wine")
-            && (t.contains("wow") || t.contains("warcraft"))
+        || c.contains("wine") && (t.contains("wow") || t.contains("warcraft"))
 }
 
 pub fn list_wow_windows() -> Vec<DesktopWindow> {
@@ -113,19 +112,21 @@ fn sway_wow_windows() -> Vec<DesktopWindow> {
 fn walk_sway(node: &SwayNode, out: &mut Vec<DesktopWindow>) {
     let title = node.name.as_deref().unwrap_or("");
     let class = node.app_id.as_deref().unwrap_or("");
-    if node.id.is_some() && title_or_class_looks_like_wow(title, class) {
-        if let Some(rect) = &node.rect {
-            out.push(DesktopWindow {
-                compositor: "sway".into(),
-                address: node.id.unwrap().to_string(),
-                title: title.to_string(),
-                class: class.to_string(),
-                x: rect.x,
-                y: rect.y,
-                width: rect.width.max(0) as u32,
-                height: rect.height.max(0) as u32,
-                fullscreen: false,
-            });
+    if let Some(id) = node.id {
+        if title_or_class_looks_like_wow(title, class) {
+            if let Some(rect) = &node.rect {
+                out.push(DesktopWindow {
+                    compositor: "sway".into(),
+                    address: id.to_string(),
+                    title: title.to_string(),
+                    class: class.to_string(),
+                    x: rect.x,
+                    y: rect.y,
+                    width: rect.width.max(0) as u32,
+                    height: rect.height.max(0) as u32,
+                    fullscreen: false,
+                });
+            }
         }
     }
     for child in node.nodes.iter().flatten() {

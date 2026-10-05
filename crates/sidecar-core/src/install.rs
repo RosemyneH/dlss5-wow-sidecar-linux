@@ -1,11 +1,6 @@
 use std::path::{Path, PathBuf};
 
-const BRANCH_DIRS: &[&str] = &[
-    "_retail_",
-    "_classic_beta_",
-    "_classic_",
-    "_classic_era_",
-];
+const BRANCH_DIRS: &[&str] = &["_retail_", "_classic_beta_", "_classic_", "_classic_era_"];
 
 const WOW_EXE_NAMES: &[&str] = &["Wow.exe", "WowB.exe", "WowClassic.exe", "WowClassicT.exe"];
 
@@ -20,17 +15,9 @@ const LAYOUT_SUFFIXES: &[&str] = &[
     "Games/WoW335",
 ];
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct SmartScanOptions {
     pub extra_roots: Vec<PathBuf>,
-}
-
-impl Default for SmartScanOptions {
-    fn default() -> Self {
-        Self {
-            extra_roots: Vec::new(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
