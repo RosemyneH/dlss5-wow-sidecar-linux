@@ -1,8 +1,10 @@
 use std::path::PathBuf;
+use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use sidecar_config::{matching_preset, parse_config, PRESETS};
+use sidecar_capture::{start_capture, wow_window_hint};
 use sidecar_core::{SmartScanOptions, list_wow_windows, smart_scan_installs};
 use tracing_subscriber::EnvFilter;
 
@@ -27,6 +29,14 @@ enum Commands {
     Windows,
     /// Quick environment check
     Doctor,
+    /// Capture frames from portal ScreenCast (or pw-record fallback)
+    CaptureTest {
+        #[arg(long, default_value_t = 10)]
+        frames: u32,
+        /// Do not prefer the first detected WoW window as a capture hint
+        #[arg(long)]
+        any_window: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -98,9 +108,51 @@ fn main() -> Result<()> {
                 cfg.neural_passes
             );
             println!("neural pass runtime: not implemented yet (see docs/ROADMAP.md)");
+            println!("capture: see docs/CAPTURE.md (wowsidecar-linux capture-test)");
+        }
+        Commands::CaptureTest { frames, any_window } => {
+            run_capture_test(frames, any_window)?;
         }
     }
 
+    Ok(())
+}
+
+fn run_capture_test(frames: u32, any_window: bool) -> Result<()> {
+    let hint = if any_window {
+        None
+    } else {
+        wow_window_hint()
+    };
+    if let Some(h) = &hint {
+        println!(
+            "hint: [{}] {} ({}) — select this window in the portal dialog",
+            h.compositor,
+            h.title,
+            h.address
+        );
+    } else {
+        println!("no WoW window hint; pick any window in the portal dialog");
+    }
+
+    let stream = start_capture(hint).context("start_capture")?;
+    for i in 0..frames {
+        let frame = stream
+            .next_frame_timeout(Duration::from_secs(60))
+            .with_context(|| format!("frame {i}"))?;
+        if !frame.validate() {
+            anyhow::bail!("frame {i}: invalid RGBA buffer");
+        }
+        println!(
+            "frame {}: {}x{} rgba_bytes={} timestamp={}",
+            i,
+            frame.width,
+            frame.height,
+            frame.rgba.len(),
+            frame.timestamp
+        );
+    }
+    println!("captured {} frame(s)", frames);
     Ok(())
 }
 

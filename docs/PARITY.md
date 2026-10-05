@@ -9,7 +9,7 @@
 | P03 | `sidecar.toml` config | yes | yes | sidecar-config |
 | P04 | System checks / probes | yes | yes | sidecar-probes |
 | P05 | Injector filename scan | yes | yes | sidecar-probes |
-| P06 | PipeWire/window capture | WGC | partial | sidecar-capture |
+| P06 | PipeWire/window capture | WGC | partial (portal + pw-record fallback) | sidecar-capture |
 | P07 | Overlay present | D3D11 | partial | sidecar-overlay |
 | P08 | Overlay daemon + IPC | wowsidecar.exe | partial | sidecar-runtime |
 | P09 | Hotkeys (no inject) | yes | partial | sidecar-runtime |
