@@ -70,6 +70,35 @@ pub fn poll_tracked_wow_geometry(tracked: &DesktopWindow) -> (GeometrySync, Opti
     sync_desktop_geometry(tracked, &list_wow_windows())
 }
 
+pub fn resolve_tracked_desktop(desktop: &DesktopWindow) -> (DesktopWindow, GeometrySync) {
+    let (sync, updated) = poll_tracked_wow_geometry(desktop);
+    let desktop = updated.unwrap_or_else(|| desktop.clone());
+    (desktop, sync)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OverlayChrome {
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+    pub always_on_top: bool,
+    pub borderless: bool,
+    pub match_game_fullscreen: bool,
+}
+
+pub fn overlay_chrome_from_desktop(d: &DesktopWindow) -> OverlayChrome {
+    OverlayChrome {
+        x: d.x,
+        y: d.y,
+        width: d.width,
+        height: d.height,
+        always_on_top: true,
+        borderless: true,
+        match_game_fullscreen: d.fullscreen,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -133,5 +162,32 @@ mod tests {
         let (sync, updated) = sync_desktop_geometry(&tracked, &[fresh]);
         assert_eq!(sync, GeometrySync::Unchanged);
         assert!(updated.is_none());
+    }
+
+    #[test]
+    fn sync_reports_resize() {
+        let tracked = sample_window("0xabc", 0, 0, 800, 600);
+        let fresh = sample_window("0xabc", 0, 0, 1920, 1080);
+        let (sync, updated) = sync_desktop_geometry(&tracked, &[fresh]);
+        assert_eq!(sync, GeometrySync::Updated);
+        let u = updated.unwrap();
+        assert_eq!((u.width, u.height), (1920, 1080));
+    }
+
+    #[test]
+    fn overlay_chrome_is_aot_borderless_over_rect() {
+        let w = sample_window("0x1", 40, 80, 1280, 720);
+        assert_eq!(
+            overlay_chrome_from_desktop(&w),
+            OverlayChrome {
+                x: 40,
+                y: 80,
+                width: 1280,
+                height: 720,
+                always_on_top: true,
+                borderless: true,
+                match_game_fullscreen: false,
+            }
+        );
     }
 }

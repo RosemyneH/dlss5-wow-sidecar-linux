@@ -1,9 +1,11 @@
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use sidecar_capture::{mock_capture_enabled, start_capture, wow_window_hint, CaptureFrame, FrameStream};
+use sidecar_capture::{
+    mock_capture_enabled, start_capture_or_mock, start_mock_stream, wow_window_hint, FrameStream,
+};
 use sidecar_config::{default_config_path, load_config, Config};
 use sidecar_core::DesktopWindow;
 use sidecar_neural::{
@@ -139,59 +141,19 @@ fn desktop_for_pipeline(hint: Option<sidecar_capture::WindowHint>, mock: bool) -
     mock_desktop_window()
 }
 
-enum CaptureBackend {
-    Live(FrameStream),
-    Mock(mpsc::Receiver<CaptureFrame>),
-}
-
-impl CaptureBackend {
-    fn next_frame(&self, timeout: Duration) -> Result<CaptureFrame, sidecar_capture::CaptureError> {
-        match self {
-            CaptureBackend::Live(stream) => stream.next_frame_timeout(timeout),
-            CaptureBackend::Mock(rx) => match rx.recv_timeout(timeout) {
-                Ok(frame) => Ok(frame),
-                Err(mpsc::RecvTimeoutError::Timeout) => {
-                    Err(sidecar_capture::CaptureError::Unavailable(
-                        "timed out waiting for frame".into(),
-                    ))
-                }
-                Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    Err(sidecar_capture::CaptureError::StreamClosed)
-                }
-            },
-        }
-    }
-}
-
-fn open_capture(mock: bool) -> anyhow::Result<(CaptureBackend, DesktopWindow)> {
-    if mock {
+fn open_capture(force_mock: bool) -> anyhow::Result<(FrameStream, DesktopWindow, bool)> {
+    if force_mock || mock_capture_enabled() {
         let desktop = mock_desktop_window();
-        let (tx, rx) = mpsc::channel();
-        let w = desktop.width;
-        let h = desktop.height;
-        thread::spawn(move || {
-            let len = (w * h * 4) as usize;
-            let mut rgba = vec![0u8; len];
-            for i in (0..len).step_by(4) {
-                rgba[i] = 80;
-                rgba[i + 1] = 120;
-                rgba[i + 2] = 200;
-                rgba[i + 3] = 255;
-            }
-            for _ in 0..120 {
-                if tx.send(CaptureFrame::new(rgba.clone(), w, h)).is_err() {
-                    break;
-                }
-                thread::sleep(Duration::from_millis(16));
-            }
-        });
-        return Ok((CaptureBackend::Mock(rx), desktop));
+        return Ok((start_mock_stream(), desktop, true));
     }
-
+    if !capture_environment_available() {
+        let desktop = mock_desktop_window();
+        return Ok((start_mock_stream(), desktop, true));
+    }
     let hint = wow_window_hint();
     let desktop = desktop_for_pipeline(hint.clone(), false);
-    let stream = start_capture(hint)?;
-    Ok((CaptureBackend::Live(stream), desktop))
+    let stream = start_capture_or_mock(hint).map_err(|e| anyhow::anyhow!("{e}"))?;
+    Ok((stream, desktop, false))
 }
 
 fn capture_environment_available() -> bool {
@@ -209,8 +171,7 @@ fn run_pipeline_loop(
     stop_requested: Arc<AtomicBool>,
     force_mock: bool,
 ) -> anyhow::Result<()> {
-    let use_mock = force_mock || mock_capture_enabled() || !capture_environment_available();
-    let (capture, desktop) = open_capture(use_mock).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let (capture, desktop, use_mock) = open_capture(force_mock)?;
     info!(
         "pipeline capture: {} ({}x{})",
         if use_mock { "mock" } else { "live" },
@@ -222,7 +183,8 @@ fn run_pipeline_loop(
     let mut presenter = if use_mock {
         None
     } else {
-        let mut p = OverlayPresenter::for_desktop_window(&desktop).map_err(|e| anyhow::anyhow!("{e}"))?;
+        let mut p =
+            OverlayPresenter::for_desktop_window(&desktop).map_err(|e| anyhow::anyhow!("{e}"))?;
         p.set_visible(initial_visible && config.show_overlay);
         Some(p)
     };
@@ -251,7 +213,7 @@ fn run_pipeline_loop(
             last_overlay_visible = visible;
         }
 
-        match capture.next_frame(Duration::from_millis(32)) {
+        match capture.next_frame_timeout(Duration::from_millis(32)) {
             Ok(frame) if frame.validate() => {
                 capture_fps.tick_frame();
 

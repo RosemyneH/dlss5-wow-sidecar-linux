@@ -3,8 +3,9 @@ mod presenter;
 mod pump;
 
 pub use geometry::{
-    desktop_rects_equal, find_window_by_address, poll_tracked_wow_geometry, sync_desktop_geometry,
-    DesktopRect, GeometrySync,
+    desktop_rects_equal, find_window_by_address, overlay_chrome_from_desktop,
+    poll_tracked_wow_geometry, resolve_tracked_desktop, sync_desktop_geometry, DesktopRect,
+    GeometrySync, OverlayChrome,
 };
 pub use presenter::{OverlayError, OverlayPresenter};
 pub use pump::OverlayPumpOutcome;

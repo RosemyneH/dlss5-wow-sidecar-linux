@@ -2,7 +2,9 @@ use std::num::NonZeroU32;
 use std::rc::Rc;
 use std::time::Duration;
 
-use crate::geometry::{poll_tracked_wow_geometry, GeometrySync};
+use crate::geometry::{
+    overlay_chrome_from_desktop, poll_tracked_wow_geometry, resolve_tracked_desktop, GeometrySync,
+};
 use crate::pump::OverlayPumpOutcome;
 
 use sidecar_core::DesktopWindow;
@@ -60,11 +62,12 @@ struct OverlayApp {
     pending: Option<PendingFrame>,
     dirty: bool,
     visible: bool,
+    last_geometry_sync: GeometrySync,
 }
 
 impl OverlayApp {
     fn new(context: Context<OwnedDisplayHandle>, desktop: DesktopWindow) -> Self {
-        let len = desktop.width as usize * desktop.height as usize;
+        let len = backing_pixel_count(desktop.width, desktop.height);
         Self {
             context,
             desktop,
@@ -74,6 +77,7 @@ impl OverlayApp {
             pending: None,
             dirty: false,
             visible: true,
+            last_geometry_sync: GeometrySync::Unchanged,
         }
     }
 
@@ -112,7 +116,7 @@ impl OverlayApp {
             self.desktop.width != desktop.width || self.desktop.height != desktop.height;
         self.desktop = desktop;
         if size_changed {
-            let len = self.desktop.width as usize * self.desktop.height as usize;
+            let len = backing_pixel_count(self.desktop.width, self.desktop.height);
             self.backing = vec![0; len];
             self.dirty = true;
         }
@@ -218,13 +222,13 @@ pub struct OverlayPresenter {
 
 impl OverlayPresenter {
     pub fn for_desktop_window(desktop: &DesktopWindow) -> Result<Self, OverlayError> {
+        let (desktop, sync) = resolve_tracked_desktop(desktop);
         let event_loop = EventLoop::new()?;
         let context =
             Context::new(event_loop.owned_display_handle()).map_err(OverlayError::Softbuffer)?;
-        Ok(Self {
-            event_loop,
-            app: OverlayApp::new(context, desktop.clone()),
-        })
+        let mut app = OverlayApp::new(context, desktop);
+        app.last_geometry_sync = sync;
+        Ok(Self { event_loop, app })
     }
 
     /// Queue an RGBA patch at `(x,y)` with size `(w,h)` in overlay-local coordinates (origin = desktop window top-left).
@@ -245,7 +249,16 @@ impl OverlayPresenter {
         if let Some(desktop) = updated {
             self.app.apply_desktop_geometry(desktop);
         }
+        self.app.last_geometry_sync = sync;
         sync
+    }
+
+    pub fn last_geometry_sync(&self) -> GeometrySync {
+        self.app.last_geometry_sync
+    }
+
+    pub fn tracked_desktop(&self) -> &DesktopWindow {
+        &self.app.desktop
     }
 
     /// Drive the winit loop once: poll WoW geometry, then pump events.
@@ -276,15 +289,22 @@ impl OverlayPresenter {
 }
 
 fn apply_window_chrome(window: &Window, desktop: &DesktopWindow) {
-    window.set_window_level(WindowLevel::AlwaysOnTop);
-    let size = PhysicalSize::new(desktop.width, desktop.height);
+    let chrome = overlay_chrome_from_desktop(desktop);
+    if chrome.always_on_top {
+        window.set_window_level(WindowLevel::AlwaysOnTop);
+    }
+    let size = PhysicalSize::new(chrome.width, chrome.height);
     let _ = window.request_inner_size(size);
-    window.set_outer_position(PhysicalPosition::new(desktop.x, desktop.y));
-    if desktop.fullscreen {
+    window.set_outer_position(PhysicalPosition::new(chrome.x, chrome.y));
+    if chrome.match_game_fullscreen {
         window.set_fullscreen(Some(Fullscreen::Borderless(None)));
     } else {
         window.set_fullscreen(None);
     }
+}
+
+fn backing_pixel_count(width: u32, height: u32) -> usize {
+    width as usize * height as usize
 }
 
 fn validate_frame_blit(
@@ -325,5 +345,10 @@ mod tests {
     fn show_frame_rejects_out_of_bounds_blit() {
         let err = validate_frame_blit(64, 64, &[0u8; 64], 62, 62, 4, 4).expect_err("oob");
         assert!(matches!(err, OverlayError::OutOfBounds { .. }));
+    }
+
+    #[test]
+    fn backing_pixel_count_matches_rgba_stride() {
+        assert_eq!(backing_pixel_count(1920, 1080), 1920 * 1080);
     }
 }
