@@ -6,7 +6,7 @@ use std::time::Duration;
 use sidecar_capture::{
     mock_capture_enabled, start_capture_or_mock, start_mock_stream, wow_window_hint, FrameStream,
 };
-use sidecar_config::{default_config_path, load_config, Config};
+use sidecar_config::{default_config_path, load_config};
 use sidecar_core::DesktopWindow;
 use sidecar_neural::{
     build_processor_from_config, process_frame, processor_id_for_config, FrameLayout,
@@ -82,7 +82,6 @@ impl Pipeline {
 
         *guard = Some(thread::spawn(move || {
             if let Err(e) = run_pipeline_loop(
-                config,
                 overlay_visible,
                 status.clone(),
                 stop_requested,
@@ -165,12 +164,17 @@ fn capture_environment_available() -> bool {
 }
 
 fn run_pipeline_loop(
-    config: Config,
     overlay_visible: Arc<Mutex<bool>>,
     status: Arc<Mutex<SidecarStatus>>,
     stop_requested: Arc<AtomicBool>,
     force_mock: bool,
 ) -> anyhow::Result<()> {
+    let config_path = default_config_path();
+    let (config, warnings) = load_config(&config_path);
+    for w in warnings {
+        warn!("config: {w}");
+    }
+
     let (capture, desktop, use_mock) = open_capture(force_mock)?;
     info!(
         "pipeline capture: {} ({}x{})",
@@ -190,15 +194,17 @@ fn run_pipeline_loop(
     };
 
     build_processor_from_config(&config)?;
-    let pass_name = processor_id_for_config(&config).to_string();
 
     let mut capture_fps = FpsCounter::new(Duration::from_secs(1));
     let mut overlay_fps = FpsCounter::new(Duration::from_secs(1));
-    let mut last_overlay_visible = initial_visible;
+    let mut last_overlay_on = initial_visible && config.show_overlay;
     let mut frames: u64 = 0;
     let mut drops: u64 = 0;
 
     while !stop_requested.load(Ordering::Acquire) {
+        let (config, _) = load_config(&config_path);
+        let pass_name = processor_id_for_config(&config).to_string();
+
         if let Some(p) = presenter.as_mut() {
             if p.pump(Some(Duration::from_millis(0))).exit_code().is_some() {
                 break;
@@ -206,11 +212,12 @@ fn run_pipeline_loop(
         }
 
         let visible = *overlay_visible.lock().unwrap();
-        if visible != last_overlay_visible {
+        let overlay_on = visible && config.show_overlay;
+        if overlay_on != last_overlay_on {
             if let Some(p) = presenter.as_mut() {
-                p.set_visible(visible && config.show_overlay);
+                p.set_visible(overlay_on);
             }
-            last_overlay_visible = visible;
+            last_overlay_on = overlay_on;
         }
 
         match capture.next_frame_timeout(Duration::from_millis(32)) {
@@ -224,7 +231,7 @@ fn run_pipeline_loop(
                 frames += 1;
                 let mut presented = false;
                 if let Some(p) = presenter.as_mut() {
-                    if visible && config.show_overlay {
+                    if overlay_on {
                         if p.show_frame(&work, 0, 0, frame.width, frame.height).is_ok() {
                             overlay_fps.tick_frame();
                             presented = true;
@@ -235,7 +242,7 @@ fn run_pipeline_loop(
                             drops += 1;
                         }
                     }
-                } else if visible && config.show_overlay {
+                } else if overlay_on {
                     overlay_fps.tick_frame();
                     presented = true;
                 }

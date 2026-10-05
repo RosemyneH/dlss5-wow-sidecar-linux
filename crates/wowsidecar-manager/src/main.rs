@@ -9,9 +9,10 @@ use std::time::{Duration, Instant};
 use eframe::egui;
 use i18n::{tr, Msg};
 use sidecar_config::{
-    apply_preset, default_config_path, load_config, matching_preset, reset_rendering_settings,
-    save_config, sidecar_dir, Config, NeuralStrength, PRESETS,
+    apply_preset, default_config_path, load_config, matching_preset, neural_strength_of,
+    reset_rendering_settings, save_config, sidecar_dir, Config, NeuralStrength, PRESETS,
 };
+use sidecar_neural::processor_id_for_config;
 use sidecar_core::{list_wow_windows, smart_scan_installs, SmartScanOptions, WowInstall};
 use sidecar_install::{install_component, setup_page_data, SetupPageData};
 use sidecar_probes::{run_all_probes, ProbeResult, ProbeState};
@@ -821,7 +822,25 @@ impl ManagerApp {
         });
 
         ui.horizontal(|ui| {
-            ui.label("Neural strength:");
+            ui.label("Neural backend:");
+            ui.monospace(processor_id_for_config(&self.config));
+            ui.label(format!("(neural_pass={})", self.config.neural_pass));
+        });
+        if let Some(strength) = neural_strength_of(&self.config) {
+            ui.label(format!(
+                "Neural strength: {} — {}",
+                strength.name(),
+                strength.note()
+            ));
+        } else {
+            ui.label(format!(
+                "Neural strength: custom — {} passes",
+                self.config.neural_passes
+            ));
+        }
+
+        ui.horizontal(|ui| {
+            ui.label("Passes:");
             for strength in NeuralStrength::ALL {
                 let selected = sidecar_config::neural_strength_of(&self.config) == Some(strength);
                 if ui.selectable_label(selected, strength.name()).clicked() {

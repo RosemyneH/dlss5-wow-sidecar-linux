@@ -16,6 +16,7 @@ anyhow = { workspace = true }
 eframe = { version = "0.31", default-features = true }
 egui = "0.31"
 sidecar-config = { path = "../sidecar-config" }
+sidecar-neural = { path = "../sidecar-neural" }
 sidecar-core = { path = "../sidecar-core" }
 sidecar-install = { path = "../sidecar-install" }
 sidecar-probes = { path = "../sidecar-probes" }
