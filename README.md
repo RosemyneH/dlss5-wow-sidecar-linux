@@ -4,9 +4,13 @@ Linux-native companion to [dlss5-wow-sidecar](https://github.com/xilla420/dlss5-
 
 Inspired by the Windows tool’s safety model (out-of-process only). This is **not** a fork of its binaries — it is a new stack for **Hyprland / Sway / PipeWire**.
 
+## Credits & upstream
+
+**Based on** [xilla420/dlss5-wow-sidecar](https://github.com/xilla420/dlss5-wow-sidecar) — thanks to **xilla420** and everyone who built and maintained the original Windows sidecar. This Linux tree is an independent Rust codebase (portal capture, Vulkan/Wayland); feature parity is tracked in [docs/PARITY.md](docs/PARITY.md).
+
 ## Parity workflow
 
-Windows reference: `~/Repos/dlss5-wow-sidecar`. Checklist: [docs/PARITY.md](docs/PARITY.md).
+Windows reference: [github.com/xilla420/dlss5-wow-sidecar](https://github.com/xilla420/dlss5-wow-sidecar). Checklist: [docs/PARITY.md](docs/PARITY.md).
 
 ```bash
 ./scripts/parity-status.sh    # open items + build
@@ -31,7 +35,8 @@ Ten parallel workstreams (config, probes, capture, overlay, runtime, neural, pre
 ## Build & run
 
 ```bash
-cd /home/emma/Repos/dlss5-wow-sidecar-linux
+git clone https://github.com/RosemyneH/dlss5-wow-sidecar-linux.git
+cd dlss5-wow-sidecar-linux
 cargo build --release
 ```
 
