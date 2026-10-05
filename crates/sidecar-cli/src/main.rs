@@ -3,9 +3,10 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use sidecar_config::{matching_preset, parse_config, PRESETS};
 use sidecar_capture::{start_capture, wow_window_hint};
-use sidecar_core::{SmartScanOptions, list_wow_windows, smart_scan_installs};
+use sidecar_config::{matching_preset, parse_config, PRESETS};
+use sidecar_core::{list_wow_windows, smart_scan_installs, SmartScanOptions};
+use sidecar_runtime::{control_socket_path, is_running, read, send, SidecarCommand};
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser)]
@@ -37,18 +38,29 @@ enum Commands {
         #[arg(long)]
         any_window: bool,
     },
+    /// Run overlay daemon in this process (same as `wowsidecar-daemon`)
+    Run,
+    /// Spawn `wowsidecar-daemon` if not running
+    Start,
+    /// Tell daemon to stop
+    Stop,
+    /// Query daemon status
+    Status {
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 fn main() -> Result<()> {
     tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env().add_directive("wowsidecar_linux=info".parse()?))
+        .with_env_filter(
+            EnvFilter::from_default_env().add_directive("wowsidecar_linux=info".parse()?),
+        )
         .init();
 
     match Cli::parse().command {
         Commands::Scan { root } => {
-            let opts = SmartScanOptions {
-                extra_roots: root,
-            };
+            let opts = SmartScanOptions { extra_roots: root };
             let installs = smart_scan_installs(&opts);
             if installs.is_empty() {
                 println!("no WoW installs found");
@@ -87,11 +99,18 @@ fn main() -> Result<()> {
             }
         }
         Commands::Doctor => {
-            println!("session: {}", std::env::var("XDG_SESSION_TYPE").unwrap_or_else(|_| "?".into()));
+            println!(
+                "session: {}",
+                std::env::var("XDG_SESSION_TYPE").unwrap_or_else(|_| "?".into())
+            );
             let installs = smart_scan_installs(&SmartScanOptions::default());
             println!("installs found: {}", installs.len());
             if let Some(best) = installs.first() {
-                println!("best install: {} ({})", best.game_dir.display(), best.client_exe);
+                println!(
+                    "best install: {} ({})",
+                    best.game_dir.display(),
+                    best.client_exe
+                );
             }
             let windows = list_wow_windows();
             println!("wow windows: {}", windows.len());
@@ -104,14 +123,84 @@ fn main() -> Result<()> {
                 .unwrap_or("custom");
             println!(
                 "\nconfig: preset={} neural_passes={} (1x=1, 2x=2, 3x=3 passes)",
-                preset_name,
-                cfg.neural_passes
+                preset_name, cfg.neural_passes
             );
             println!("neural pass runtime: not implemented yet (see docs/ROADMAP.md)");
-            println!("capture: see docs/CAPTURE.md (wowsidecar-linux capture-test)");
+            println!("capture: docs/CAPTURE.md (`wowsidecar-linux capture-test`)");
+            println!(
+                "runtime ipc: {} ({})",
+                if is_running() {
+                    "daemon up"
+                } else {
+                    "daemon down"
+                },
+                control_socket_path().display()
+            );
         }
         Commands::CaptureTest { frames, any_window } => {
             run_capture_test(frames, any_window)?;
+        }
+        Commands::Run => sidecar_runtime::run_daemon()?,
+        Commands::Stop => {
+            if send(SidecarCommand::Stop) {
+                println!("stop sent");
+            } else {
+                println!("no daemon listening at {}", control_socket_path().display());
+            }
+        }
+        Commands::Status { json } => {
+            if !is_running() {
+                println!("daemon not running ({})", control_socket_path().display());
+                return Ok(());
+            }
+            let Some(st) = read() else {
+                println!("daemon did not return status");
+                return Ok(());
+            };
+            if json {
+                println!("{}", serde_json::to_string_pretty(&st)?);
+            } else {
+                println!(
+                    "pid={} overlay={} hud={} fps={:.1} capture_fps={:.1} frames={} variant={}",
+                    st.process_id,
+                    st.overlay_visible,
+                    st.hud_visible,
+                    st.fps,
+                    st.capture_fps,
+                    st.frames,
+                    st.runtime_variant
+                );
+            }
+        }
+        Commands::Start => {
+            if is_running() {
+                println!(
+                    "daemon already running ({})",
+                    control_socket_path().display()
+                );
+                return Ok(());
+            }
+            let daemon = daemon_exe_path()?;
+            if !daemon.is_file() {
+                anyhow::bail!(
+                    "missing {} — build with: cargo build -p sidecar-runtime",
+                    daemon.display()
+                );
+            }
+            std::process::Command::new(&daemon)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .context("spawn wowsidecar-daemon")?;
+            for _ in 0..20 {
+                if is_running() {
+                    println!("daemon started ({})", control_socket_path().display());
+                    return Ok(());
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            anyhow::bail!("daemon did not bind control socket in time");
         }
     }
 
@@ -119,17 +208,11 @@ fn main() -> Result<()> {
 }
 
 fn run_capture_test(frames: u32, any_window: bool) -> Result<()> {
-    let hint = if any_window {
-        None
-    } else {
-        wow_window_hint()
-    };
+    let hint = if any_window { None } else { wow_window_hint() };
     if let Some(h) = &hint {
         println!(
             "hint: [{}] {} ({}) — select this window in the portal dialog",
-            h.compositor,
-            h.title,
-            h.address
+            h.compositor, h.title, h.address
         );
     } else {
         println!("no WoW window hint; pick any window in the portal dialog");
@@ -154,6 +237,15 @@ fn run_capture_test(frames: u32, any_window: bool) -> Result<()> {
     }
     println!("captured {} frame(s)", frames);
     Ok(())
+}
+
+fn daemon_exe_path() -> Result<PathBuf> {
+    let exe = std::env::current_exe().context("current_exe")?;
+    let daemon = exe
+        .parent()
+        .map(|d| d.join("wowsidecar-daemon"))
+        .unwrap_or_else(|| PathBuf::from("wowsidecar-daemon"));
+    Ok(daemon)
 }
 
 fn which(cmd: &str) -> String {

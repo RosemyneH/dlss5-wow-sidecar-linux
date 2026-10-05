@@ -21,8 +21,10 @@ Ten parallel workstreams (config, probes, capture, overlay, runtime, neural, pre
 |-----------|--------|
 | Smart scan install paths (`_classic_beta_`, `WowB.exe`, …) | **Done** (`scan`) |
 | Find WoW window (Hyprland / Sway) | **Done** (`windows`) |
-| PipeWire / portal window capture | Planned |
-| Fullscreen overlay (Vulkan) | Planned |
+| PipeWire / portal window capture | **Partial** (`capture-test`) |
+| Overlay present (winit/softbuffer) | **Partial** (`sidecar-overlay`) |
+| Manager UI (egui) | **Partial** (`wowsidecar-manager`) |
+| Daemon + IPC | **Partial** (`wowsidecar-daemon`, `start`/`status`) |
 | DLSS 5–class neural pass on Linux | **Partial** — `sidecar-neural` CPU sharpen MVP; see gap below |
 
 ## Build & run
@@ -34,6 +36,9 @@ cargo build --release
 ./target/release/wowsidecar-linux scan
 ./target/release/wowsidecar-linux windows   # game running, borderless/windowed
 ./target/release/wowsidecar-linux doctor
+./target/release/wowsidecar-linux capture-test --frames 10
+cargo build -p wowsidecar-manager && ./target/release/wowsidecar-manager
+./target/release/wowsidecar-linux start && ./target/release/wowsidecar-linux status
 ```
 
 Extra search roots:

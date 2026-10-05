@@ -15,5 +15,7 @@ clap.workspace = true
 sidecar-config = { path = "../sidecar-config" }
 sidecar-capture = { path = "../sidecar-capture" }
 sidecar-core = { path = "../sidecar-core" }
+sidecar-runtime = { path = "../sidecar-runtime" }
+serde_json.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
