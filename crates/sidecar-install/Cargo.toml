@@ -1,0 +1,15 @@
+[package]
+name = "sidecar-install"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Linux setup components, runtime deps, and BUILD-MANIFEST for the manager"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.10"
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
