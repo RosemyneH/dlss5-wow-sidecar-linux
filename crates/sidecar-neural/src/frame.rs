@@ -30,7 +30,9 @@ pub enum ProcessError {
 impl FrameLayout {
     pub fn new(width: u32, height: u32) -> Result<Self, ProcessError> {
         if width == 0 || height == 0 {
-            return Err(ProcessError::InvalidLayout("width and height must be non-zero"));
+            return Err(ProcessError::InvalidLayout(
+                "width and height must be non-zero",
+            ));
         }
         Ok(Self { width, height })
     }

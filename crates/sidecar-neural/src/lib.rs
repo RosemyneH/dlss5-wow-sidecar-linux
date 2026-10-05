@@ -4,23 +4,18 @@ mod passthrough;
 mod sharpen;
 
 pub use frame::{FrameLayout, ProcessError, RgbaFrame};
-pub use onnx::{OnnxProcessorConfig, build_onnx_processor};
+pub use onnx::{build_onnx_processor, OnnxProcessorConfig};
 pub use passthrough::Passthrough;
 pub use sharpen::SimpleSharpen;
 
 use std::path::PathBuf;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum NeuralBackend {
+    #[default]
     Passthrough,
     SimpleSharpen { amount: f32 },
     Onnx { model_path: PathBuf },
-}
-
-impl Default for NeuralBackend {
-    fn default() -> Self {
-        Self::Passthrough
-    }
 }
 
 pub trait FrameProcessor: Send {
@@ -36,15 +31,11 @@ pub trait FrameProcessor: Send {
 pub fn build_processor(backend: NeuralBackend) -> Result<Box<dyn FrameProcessor>, ProcessError> {
     match backend {
         NeuralBackend::Passthrough => Ok(Box::new(Passthrough)),
-        NeuralBackend::SimpleSharpen { amount } => {
-            Ok(Box::new(SimpleSharpen::new(amount)?))
-        }
-        NeuralBackend::Onnx { model_path } => {
-            build_onnx_processor(&OnnxProcessorConfig {
-                model_path,
-                execution_provider: None,
-            })
-        }
+        NeuralBackend::SimpleSharpen { amount } => Ok(Box::new(SimpleSharpen::new(amount)?)),
+        NeuralBackend::Onnx { model_path } => build_onnx_processor(&OnnxProcessorConfig {
+            model_path,
+            execution_provider: None,
+        }),
     }
 }
 
@@ -90,7 +81,9 @@ mod tests {
         let input = checker_rgba(&layout);
         let mut passthrough_out = vec![0u8; layout.byte_len()];
         let mut sharpen_out = vec![0u8; layout.byte_len()];
-        Passthrough.process(&layout, &input, &mut passthrough_out).unwrap();
+        Passthrough
+            .process(&layout, &input, &mut passthrough_out)
+            .unwrap();
         let mut sharpen = SimpleSharpen::new(0.85).unwrap();
         sharpen.process(&layout, &input, &mut sharpen_out).unwrap();
         assert_ne!(passthrough_out, sharpen_out);
@@ -101,9 +94,7 @@ mod tests {
     fn onnx_backend_not_wired_yet() {
         let model = std::env::temp_dir().join("wowsidecar-neural-test.onnx");
         std::fs::write(&model, b"stub").unwrap();
-        let result = build_processor(NeuralBackend::Onnx {
-            model_path: model,
-        });
+        let result = build_processor(NeuralBackend::Onnx { model_path: model });
         assert!(matches!(result, Err(ProcessError::OnnxUnavailable)));
     }
 }

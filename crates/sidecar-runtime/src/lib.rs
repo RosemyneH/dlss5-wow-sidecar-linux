@@ -15,7 +15,7 @@ pub use socket_path::{
     control_socket_path, control_socket_path_in, runtime_dir, CONTROL_SOCKET_NAME, RUNTIME_DIR_NAME,
 };
 
-pub use control::control::socket_path;
+pub use control::client::socket_path;
 
 pub fn run_daemon() -> anyhow::Result<()> {
     ensure_runtime_dir()?;

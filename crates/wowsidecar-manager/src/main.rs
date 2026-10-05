@@ -184,7 +184,7 @@ impl ManagerApp {
                 }
             }
             ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
-                ui.label(format!("Language: en (fixed for now)"));
+                ui.label("Language: en (fixed for now)");
                 ui.label(format!("Theme: {}", self.config.theme));
             });
         });

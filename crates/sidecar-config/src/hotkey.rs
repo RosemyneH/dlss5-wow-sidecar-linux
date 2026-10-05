@@ -149,7 +149,7 @@ pub fn format_hotkey(hotkey: &Hotkey) -> String {
             return out;
         }
     }
-    if vk >= VK_F1 && vk <= VK_F1 + 23 {
+    if (VK_F1..=VK_F1 + 23).contains(&vk) {
         let _ = write!(out, "F{}", vk - VK_F1 + 1);
         return out;
     }

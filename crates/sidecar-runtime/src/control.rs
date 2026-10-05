@@ -33,7 +33,7 @@ impl ControlServer {
         handler: CommandHandler,
     ) -> anyhow::Result<Self> {
         if socket_path.exists() {
-            if control::ping_socket(&socket_path)? {
+            if client::ping_socket(&socket_path)? {
                 anyhow::bail!(
                     "another overlay daemon already owns {}",
                     socket_path.display()
@@ -48,10 +48,12 @@ impl ControlServer {
         let listener = UnixListener::bind(&socket_path)?;
         listener.set_nonblocking(true)?;
 
-        let mut status = SidecarStatus::default();
-        status.process_id = std::process::id();
-        status.runtime_variant = "linux-stub".into();
-        status.pass_name = "stub".into();
+        let status = SidecarStatus {
+            process_id: std::process::id(),
+            runtime_variant: "linux-stub".into(),
+            pass_name: "stub".into(),
+            ..SidecarStatus::default()
+        };
 
         Ok(Self {
             listener,
@@ -169,7 +171,7 @@ impl Drop for ControlServer {
     }
 }
 
-pub mod control {
+pub mod client {
     use std::io::{BufRead, BufReader, Write};
     use std::os::unix::net::UnixStream;
     use std::path::{Path, PathBuf};
@@ -280,4 +282,4 @@ pub fn ensure_runtime_dir() -> anyhow::Result<()> {
     Ok(())
 }
 
-pub use control::{is_running, read, read_at, send, send_at, start_daemon, status, stop};
+pub use client::{is_running, read, read_at, send, send_at, start_daemon, status, stop};

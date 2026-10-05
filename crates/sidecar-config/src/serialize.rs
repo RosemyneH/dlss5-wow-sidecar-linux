@@ -110,6 +110,7 @@ fn write_ui_rect(out: &mut String, rect: &UiRect) {
     );
 }
 #[cfg(test)]
+#[allow(clippy::field_reassign_with_default)]
 mod tests {
     use super::*;
     use crate::parse_config;
