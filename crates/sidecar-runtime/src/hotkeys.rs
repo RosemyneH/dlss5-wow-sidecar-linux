@@ -1,28 +1,14 @@
-//! Global hotkeys without injecting into WoW.
-//!
-//! # Limitations (Linux vs Windows `RegisterHotKey`)
-//!
-//! - **evdev** (`hotkeys-evdev` feature): reads `/dev/input/event*` directly. Requires
-//!   membership in the `input` group (or root). Competes with the compositor for key
-//!   events on some setups; X11 sessions may still deliver keys to focused apps first.
-//! - **xdg-desktop-portal GlobalShortcuts**: correct for Wayland, but needs a persistent
-//!   portal session and user approval in the desktop dialog. Not wired yet — manager focus
-//!   hotkeys remain future work.
-//! - **Panic** (`Ctrl+Alt+Backspace`) is handled in the daemon when evdev is enabled;
-//!   otherwise use `wowsidecar-linux stop` or the manager Stop button.
+//! Global hotkeys — panic sends `SidecarCommand::Panic` (evdev default on daemon).
 
 use std::sync::{Arc, Mutex};
 
 use tracing::warn;
 
+use crate::protocol::SidecarCommand;
+use crate::{is_running, read, send};
+
 #[cfg(feature = "hotkeys-evdev")]
 use tracing::info;
-
-#[cfg(feature = "hotkeys-evdev")]
-use crate::protocol::SidecarCommand;
-
-#[cfg(feature = "hotkeys-evdev")]
-use crate::{is_running, read, send};
 
 pub struct HotkeyBindings {
     pub start_stop: Option<String>,
@@ -42,6 +28,48 @@ impl Default for HotkeyBindings {
     }
 }
 
+impl HotkeyBindings {
+    pub fn from_config(hotkeys: &sidecar_config::Hotkeys) -> Self {
+        fn opt(s: &str) -> Option<String> {
+            if s.is_empty() {
+                None
+            } else {
+                Some(s.to_string())
+            }
+        }
+        Self {
+            start_stop: opt(&hotkeys.start_stop),
+            toggle_overlay: opt(&hotkeys.toggle_overlay),
+            toggle_hud: opt(&hotkeys.toggle_hud),
+            panic_combo: Some("Ctrl+Alt+Backspace".into()),
+        }
+    }
+
+    pub fn apply_evdev_default_policy(self) -> Self {
+        #[cfg(all(feature = "hotkeys-evdev-panic", not(feature = "hotkeys-evdev-full")))]
+        {
+            return Self {
+                start_stop: None,
+                toggle_overlay: None,
+                toggle_hud: None,
+                panic_combo: self.panic_combo,
+            };
+        }
+        #[cfg(not(all(feature = "hotkeys-evdev-panic", not(feature = "hotkeys-evdev-full"))))]
+        {
+            self
+        }
+    }
+}
+
+pub fn execute_panic() -> bool {
+    execute_panic_with(|cmd| send(cmd))
+}
+
+pub fn execute_panic_with(send_cmd: impl Fn(SidecarCommand) -> bool) -> bool {
+    send_cmd(SidecarCommand::Panic)
+}
+
 pub fn spawn_hotkey_thread(stop_flag: Arc<Mutex<bool>>, bindings: HotkeyBindings) {
     std::thread::spawn(move || {
         if let Err(e) = run_hotkeys(stop_flag, bindings) {
@@ -52,16 +80,11 @@ pub fn spawn_hotkey_thread(stop_flag: Arc<Mutex<bool>>, bindings: HotkeyBindings
 
 fn run_hotkeys(stop_flag: Arc<Mutex<bool>>, bindings: HotkeyBindings) -> anyhow::Result<()> {
     #[cfg(feature = "hotkeys-evdev")]
-    {
-        return run_evdev(stop_flag, bindings);
-    }
-
+    return run_evdev(stop_flag, bindings);
     #[cfg(not(feature = "hotkeys-evdev"))]
     {
         let _ = (stop_flag, bindings);
-        anyhow::bail!(
-            "built without `hotkeys-evdev`; global shortcuts need evdev or portal (see module docs)"
-        );
+        anyhow::bail!("built without hotkeys-evdev");
     }
 }
 
@@ -69,26 +92,16 @@ fn run_hotkeys(stop_flag: Arc<Mutex<bool>>, bindings: HotkeyBindings) -> anyhow:
 fn run_evdev(stop_flag: Arc<Mutex<bool>>, bindings: HotkeyBindings) -> anyhow::Result<()> {
     use evdev::{Device, EventType, KeyCode, KeyEvent};
 
-    let mut devices: Vec<Device> = evdev::enumerate()
-        .filter_map(|(_, d)| d.open().ok())
-        .collect();
+    let mut devices: Vec<Device> = evdev::enumerate().map(|(_, d)| d).collect();
     if devices.is_empty() {
-        anyhow::bail!("no evdev nodes readable (add user to `input` group?)");
+        anyhow::bail!("no evdev nodes readable");
     }
+    info!("evdev hotkeys active ({} devices)", devices.len());
 
-    info!(
-        "evdev hotkeys active ({} devices); portal GlobalShortcuts not implemented",
-        devices.len()
-    );
-
-    let panic = bindings
-        .panic_combo
-        .as_deref()
-        .unwrap_or("Ctrl+Alt+Backspace");
+    let panic = bindings.panic_combo.as_deref().unwrap_or("Ctrl+Alt+Backspace");
     let toggle_overlay = bindings.toggle_overlay.as_deref();
     let toggle_hud = bindings.toggle_hud.as_deref();
     let start_stop = bindings.start_stop.as_deref();
-
     let mut pressed = std::collections::HashSet::new();
 
     loop {
@@ -100,8 +113,8 @@ fn run_evdev(stop_flag: Arc<Mutex<bool>>, bindings: HotkeyBindings) -> anyhow::R
                 if ev.event_type() != EventType::KEY {
                     continue;
                 }
-                let ke = KeyEvent::new(ev.code(), ev.value());
-                let code = ke.code();
+                let code = KeyCode(ev.code());
+                let ke = KeyEvent::new(code, ev.value());
                 if ke.value() == 1 {
                     pressed.insert(code);
                 } else if ke.value() == 0 {
@@ -109,34 +122,30 @@ fn run_evdev(stop_flag: Arc<Mutex<bool>>, bindings: HotkeyBindings) -> anyhow::R
                 } else {
                     continue;
                 }
-
                 if ke.value() != 1 {
                     continue;
                 }
-
                 if combo_matches(panic, &pressed, code) {
                     info!("panic hotkey");
-                    let _ = send(SidecarCommand::Stop);
+                    execute_panic();
                     *stop_flag.lock().unwrap() = true;
                     continue;
                 }
                 if combo_matches_opt(toggle_overlay, &pressed, code) {
                     let visible = read().map(|s| s.overlay_visible != 0).unwrap_or(true);
-                    let cmd = if visible {
+                    let _ = send(if visible {
                         SidecarCommand::HideOverlay
                     } else {
                         SidecarCommand::ShowOverlay
-                    };
-                    let _ = send(cmd);
+                    });
                 }
                 if combo_matches_opt(toggle_hud, &pressed, code) {
                     let visible = read().map(|s| s.hud_visible != 0).unwrap_or(false);
-                    let cmd = if visible {
+                    let _ = send(if visible {
                         SidecarCommand::HideHud
                     } else {
                         SidecarCommand::ShowHud
-                    };
-                    let _ = send(cmd);
+                    });
                 }
                 if combo_matches_opt(start_stop, &pressed, code) {
                     if is_running() {
@@ -151,6 +160,9 @@ fn run_evdev(stop_flag: Arc<Mutex<bool>>, bindings: HotkeyBindings) -> anyhow::R
 }
 
 #[cfg(feature = "hotkeys-evdev")]
+use evdev::KeyCode;
+
+#[cfg(feature = "hotkeys-evdev")]
 fn combo_matches(
     spec: &str,
     pressed: &std::collections::HashSet<KeyCode>,
@@ -158,9 +170,6 @@ fn combo_matches(
 ) -> bool {
     combo_matches_opt(Some(spec), pressed, trigger)
 }
-
-#[cfg(feature = "hotkeys-evdev")]
-use evdev::KeyCode;
 
 #[cfg(feature = "hotkeys-evdev")]
 fn combo_matches_opt(
@@ -190,8 +199,7 @@ fn parse_combo(spec: &str) -> Option<(Vec<KeyCode>, KeyCode)> {
     for part in &parts[..parts.len().saturating_sub(1)] {
         mods.push(parse_modifier(part)?);
     }
-    let key = parse_key(parts.last()?)?;
-    Some((mods, key))
+    Some((mods, parse_key(parts.last()?)?))
 }
 
 #[cfg(feature = "hotkeys-evdev")]
@@ -209,13 +217,29 @@ fn parse_modifier(name: &str) -> Option<KeyCode> {
 fn parse_key(name: &str) -> Option<KeyCode> {
     match name.to_ascii_lowercase().as_str() {
         "backspace" => Some(KeyCode::KEY_BACKSPACE),
-        "escape" | "esc" => Some(KeyCode::KEY_ESC),
         s if s.len() == 1 => {
             let c = s.chars().next()?;
-            let upper = c.to_ascii_uppercase().next()?;
+            let upper = c.to_ascii_uppercase();
             let offset = (upper as u32).saturating_sub(u32::from(b'A'));
-            Some(KeyCode::KEY_A.code() + offset as u16)
+            Some(KeyCode(KeyCode::KEY_A.0 + offset as u16))
         }
         _ => None,
+    }
+}
+
+#[cfg(all(test, feature = "hotkeys-evdev"))]
+mod tests {
+    use std::collections::HashSet;
+
+    use evdev::KeyCode;
+
+    use super::combo_matches;
+
+    #[test]
+    fn panic_combo_simulated_keypress() {
+        let mut pressed = HashSet::new();
+        pressed.insert(KeyCode::KEY_LEFTCTRL);
+        pressed.insert(KeyCode::KEY_LEFTALT);
+        assert!(combo_matches("Ctrl+Alt+Backspace", &pressed, KeyCode::KEY_BACKSPACE));
     }
 }

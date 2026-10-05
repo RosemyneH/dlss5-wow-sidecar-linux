@@ -151,6 +151,11 @@ impl ControlServer {
             SidecarCommand::HideOverlay => *self.overlay_visible.lock().unwrap() = false,
             SidecarCommand::ShowHud => *self.hud_visible.lock().unwrap() = true,
             SidecarCommand::HideHud => *self.hud_visible.lock().unwrap() = false,
+            SidecarCommand::Panic => {
+                *self.overlay_visible.lock().unwrap() = false;
+                *self.hud_visible.lock().unwrap() = false;
+                *self.stop_flag.lock().unwrap() = true;
+            }
         }
         self.sync_status_flags();
         (self.handler)(command);
@@ -196,6 +201,22 @@ pub mod client {
 
     pub fn send(command: SidecarCommand) -> bool {
         send_at(&control_socket_path(), command).unwrap_or(false)
+    }
+
+
+    pub fn send_toggle(command: SidecarCommand) -> bool {
+        let resolved = match command {
+            SidecarCommand::HideOverlay => {
+                let visible = read().map(|s| s.overlay_visible != 0).unwrap_or(true);
+                if visible { SidecarCommand::HideOverlay } else { SidecarCommand::ShowOverlay }
+            }
+            SidecarCommand::HideHud => {
+                let visible = read().map(|s| s.hud_visible != 0).unwrap_or(false);
+                if visible { SidecarCommand::HideHud } else { SidecarCommand::ShowHud }
+            }
+            other => other,
+        };
+        send(resolved)
     }
 
     pub fn send_at(path: &Path, command: SidecarCommand) -> anyhow::Result<bool> {
@@ -282,4 +303,4 @@ pub fn ensure_runtime_dir() -> anyhow::Result<()> {
     Ok(())
 }
 
-pub use client::{is_running, read, read_at, send, send_at, start_daemon, status, stop};
+pub use client::{is_running, read, read_at, send, send_at, send_toggle, start_daemon, status, stop};

@@ -433,6 +433,13 @@ impl ManagerApp {
             if s.width > 0 && s.height > 0 {
                 ui.label(format!("Pipeline: {}x{}", s.width, s.height));
             }
+            if s.vram_budget_mb > 0 {
+                ui.label(format!(
+                    "VRAM: {} / {} MiB",
+                    s.vram_used_mb,
+                    s.vram_budget_mb
+                ));
+            }
             ui.label(format!(
                 "Variant: {} | pass: {}",
                 s.runtime_variant, s.pass_name

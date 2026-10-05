@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
@@ -7,34 +8,34 @@ use sidecar_runtime::{
 use tempfile::tempdir;
 
 #[test]
-fn panic_hides_overlay() {
+fn panic_hides_overlay_and_stops_pipeline() {
     let dir = tempdir().unwrap();
     let sock = control_socket_path_in(dir.path());
 
-    let server = ControlServer::create_at(sock.clone(), Box::new(|_| {})).unwrap();
+    let server = Arc::new(ControlServer::create_at(sock.clone(), Box::new(|_| {})).unwrap());
     let stop = server.stop_flag();
+    let pump_server = server.clone();
     thread::spawn(move || {
         while !*stop.lock().unwrap() {
-            let _ = server.pump_once();
-            thread::sleep(Duration::from_millis(5));
+            let _ = pump_server.pump_once();
+            thread::sleep(Duration::from_millis(2));
         }
     });
 
     assert!(send_at(&sock, SidecarCommand::ShowHud).unwrap());
-    execute_panic_with(|cmd| send_at(&sock, cmd).unwrap());
+    assert!(execute_panic_with(|cmd| send_at(&sock, cmd).unwrap()));
 
-    let mut overlay = 1;
-    let mut hud = 1;
-    for _ in 0..50 {
+    for _ in 0..30 {
+        let _ = server.pump_once();
         if let Ok(Some(st)) = read_at(&sock) {
-            overlay = st.overlay_visible;
-            hud = st.hud_visible;
-            if overlay == 0 && hud == 0 {
-                break;
+            if st.overlay_visible == 0 && st.hud_visible == 0 {
+                return;
             }
         }
-        thread::sleep(Duration::from_millis(10));
+        thread::sleep(Duration::from_millis(5));
     }
-    assert_eq!(overlay, 0);
-    assert_eq!(hud, 0);
+
+    let st = read_at(&sock).unwrap().expect("status");
+    assert_eq!(st.overlay_visible, 0);
+    assert_eq!(st.hud_visible, 0);
 }

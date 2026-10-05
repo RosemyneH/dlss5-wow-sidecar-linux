@@ -6,7 +6,7 @@ use clap::{Parser, Subcommand};
 use sidecar_capture::{start_capture, wow_window_hint};
 use sidecar_config::{matching_preset, parse_config, PRESETS};
 use sidecar_core::{list_wow_windows, smart_scan_installs, SmartScanOptions};
-use sidecar_runtime::{control_socket_path, is_running, read, send, SidecarCommand};
+use sidecar_runtime::{control_socket_path, is_running, read, send, send_toggle, SidecarCommand};
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser)]
@@ -46,6 +46,8 @@ enum Commands {
     Start,
     /// Tell daemon to stop
     Stop,
+    /// Send control command (for compositor binds); see docs/HOTKEYS.md
+    Send { command: String },
     /// Query daemon status
     Status {
         #[arg(long)]
@@ -138,6 +140,25 @@ fn main() -> Result<()> {
                 },
                 control_socket_path().display()
             );
+            println!(
+                "hotkeys: overlay={} hud={} start_stop={} panic=Ctrl+Alt+Backspace (evdev panic-only default; see docs/HOTKEYS.md)",
+                if cfg.hotkeys.toggle_overlay.is_empty() {
+                    "(off)"
+                } else {
+                    cfg.hotkeys.toggle_overlay.as_str()
+                },
+                if cfg.hotkeys.toggle_hud.is_empty() {
+                    "(off)"
+                } else {
+                    cfg.hotkeys.toggle_hud.as_str()
+                },
+                if cfg.hotkeys.start_stop.is_empty() {
+                    "(off)"
+                } else {
+                    cfg.hotkeys.start_stop.as_str()
+                },
+            );
+            println!("compositor binds: docs/hyprland-hotkeys.conf");
         }
         Commands::CaptureTest { frames, any_window } => {
             run_capture_test(frames, any_window)?;
@@ -158,6 +179,23 @@ fn main() -> Result<()> {
                 println!("no daemon listening at {}", control_socket_path().display());
             }
         }
+        Commands::Send { command } => {
+            let Some(cmd) = SidecarCommand::from_cli_name(&command) else {
+                anyhow::bail!("unknown command: {command} (see docs/HOTKEYS.md)");
+            };
+            let ok = if cmd.is_toggle() {
+                send_toggle(cmd)
+            } else {
+                send(cmd)
+            };
+            if ok {
+                println!("{} sent", command);
+            } else if is_running() {
+                println!("daemon rejected {}", command);
+            } else {
+                println!("no daemon listening at {}", control_socket_path().display());
+            }
+        }
         Commands::Status { json } => {
             if !is_running() {
                 println!("daemon not running ({})", control_socket_path().display());
@@ -170,15 +208,26 @@ fn main() -> Result<()> {
             if json {
                 println!("{}", serde_json::to_string_pretty(&st)?);
             } else {
+                let vram = if st.vram_budget_mb > 0 {
+                    format!(
+                        " vram={}/{}MiB",
+                        st.vram_used_mb,
+                        st.vram_budget_mb
+                    )
+                } else {
+                    String::new()
+                };
                 println!(
-                    "pid={} overlay={} hud={} fps={:.1} capture_fps={:.1} frames={} variant={}",
+                    "pid={} overlay={} hud={} fps={:.1} capture_fps={:.1} frames={} pass={}{}{}",
                     st.process_id,
                     st.overlay_visible,
                     st.hud_visible,
                     st.fps,
                     st.capture_fps,
                     st.frames,
-                    st.runtime_variant
+                    st.pass_name,
+                    vram,
+                    format!(" variant={}", st.runtime_variant)
                 );
             }
         }

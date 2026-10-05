@@ -24,6 +24,13 @@ thiserror.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 evdev = { version = "0.13", optional = true }
+sidecar-capture = { path = "../sidecar-capture" }
+sidecar-config = { path = "../sidecar-config" }
+sidecar-core = { path = "../sidecar-core" }
+sidecar-neural = { path = "../sidecar-neural" }
+sidecar-overlay = { path = "../sidecar-overlay" }
+sidecar-probes = { path = "../sidecar-probes" }
 
 [dev-dependencies]
 tempfile = "3"
+sidecar-capture = { path = "../sidecar-capture" }

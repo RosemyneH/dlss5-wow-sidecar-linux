@@ -9,6 +9,7 @@ pub enum SidecarCommand {
     HideOverlay = 3,
     ShowHud = 4,
     HideHud = 5,
+    Panic = 6,
 }
 
 impl SidecarCommand {
@@ -20,8 +21,27 @@ impl SidecarCommand {
             3 => Some(Self::HideOverlay),
             4 => Some(Self::ShowHud),
             5 => Some(Self::HideHud),
+            6 => Some(Self::Panic),
             _ => None,
         }
+    }
+
+    pub fn from_cli_name(name: &str) -> Option<Self> {
+        match name.to_ascii_lowercase().as_str() {
+            "stop" => Some(Self::Stop),
+            "panic" => Some(Self::Panic),
+            "show-overlay" | "overlay-on" => Some(Self::ShowOverlay),
+            "hide-overlay" | "overlay-off" => Some(Self::HideOverlay),
+            "show-hud" | "hud-on" => Some(Self::ShowHud),
+            "hide-hud" | "hud-off" => Some(Self::HideHud),
+            "toggle-overlay" => Some(Self::HideOverlay),
+            "toggle-hud" => Some(Self::HideHud),
+            _ => None,
+        }
+    }
+
+    pub fn is_toggle(self) -> bool {
+        matches!(self, Self::HideOverlay | Self::HideHud)
     }
 }
 
