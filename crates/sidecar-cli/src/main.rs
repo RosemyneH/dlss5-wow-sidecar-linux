@@ -3,15 +3,14 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use sidecar_capture::{
-    capture_doctor_report, capture_error_remediation, format_doctor_line,
-    parse_capture_node_from_env, start_capture, wow_window_hint, CaptureError,
-};
+use sidecar_capture::{capture_doctor_report, format_doctor_line};
 use sidecar_config::{matching_preset, neural_strength_of, parse_config, PRESETS};
 use sidecar_core::{list_wow_windows, smart_scan_installs, SmartScanOptions};
 use sidecar_neural::processor_id_for_config;
 use sidecar_runtime::{control_socket_path, is_running, read, send, send_toggle, SidecarCommand};
 use tracing_subscriber::EnvFilter;
+
+mod capture_test;
 
 #[derive(Parser)]
 #[command(
@@ -41,6 +40,15 @@ enum Commands {
         /// Do not prefer the first detected WoW window as a capture hint
         #[arg(long)]
         any_window: bool,
+        /// Seconds to wait for each frame (first frame includes the portal picker)
+        #[arg(long, default_value_t = 60)]
+        timeout: u64,
+        /// Use synthetic frames to verify the tooling without portal/PipeWire
+        #[arg(long)]
+        mock: bool,
+        /// Print every frame instead of only the summary
+        #[arg(long, short)]
+        verbose: bool,
     },
     /// Run overlay daemon in this process (same as `wowsidecar-daemon`)
     Run,
@@ -129,6 +137,13 @@ fn main() -> Result<()> {
             for line in capture_doctor_report() {
                 println!("  {}", format_doctor_line(&line));
             }
+            let fixes = capture_test::doctor_fixes();
+            if !fixes.is_empty() {
+                println!("\ncapture fixes:");
+                for fix in fixes {
+                    println!("  - {fix}");
+                }
+            }
             let (cfg, _) = parse_config("");
             let preset_name = matching_preset(&cfg)
                 .map(|i| PRESETS[i].name)
@@ -180,9 +195,19 @@ fn main() -> Result<()> {
             );
             println!("compositor binds: docs/hyprland-hotkeys.conf");
         }
-        Commands::CaptureTest { frames, any_window } => {
-            run_capture_test(frames, any_window)?;
-        }
+        Commands::CaptureTest {
+            frames,
+            any_window,
+            timeout,
+            mock,
+            verbose,
+        } => capture_test::run(&capture_test::CaptureTestOptions {
+            frames,
+            any_window,
+            timeout: Duration::from_secs(timeout),
+            mock,
+            verbose,
+        })?,
         Commands::Run => sidecar_runtime::run_daemon()?,
         Commands::Serve => {
             eprintln!(
@@ -281,67 +306,6 @@ fn main() -> Result<()> {
     }
 
     Ok(())
-}
-
-fn run_capture_test(frames: u32, any_window: bool) -> Result<()> {
-    if let Some(node) = parse_capture_node_from_env() {
-        println!(
-            "WOWSIDECAR_CAPTURE_NODE={} — portal picker skipped when this PipeWire node is alive",
-            node
-        );
-    } else {
-        println!(
-            "portal: approve the ScreenCast dialog when it appears (Window tab on Hyprland; see `wowsidecar-linux doctor`)"
-        );
-    }
-
-    let hint = if any_window { None } else { wow_window_hint() };
-    if let Some(h) = &hint {
-        println!(
-            "hint: [{}] {} ({}) — pick this surface in the portal if offered",
-            h.compositor, h.title, h.address
-        );
-    } else if !any_window {
-        println!("no WoW window hint; use --any-window or set WOWSIDECAR_CAPTURE_HINT");
-    }
-
-    let stream = start_capture(hint).map_err(|e| {
-        eprintln!("{e}");
-        eprintln!("hint: {}", capture_error_remediation(&e));
-        eprintln!("run `wowsidecar-linux doctor` for capture readiness lines");
-        e
-    })?;
-
-    for i in 0..frames {
-        let frame = stream
-            .next_frame_timeout(Duration::from_secs(60))
-            .map_err(|e| capture_frame_err(i, e))?;
-        if !frame.validate() {
-            anyhow::bail!("frame {i}: invalid RGBA buffer");
-        }
-        println!(
-            "frame {}: {}x{} rgba_bytes={} timestamp={}",
-            i,
-            frame.width,
-            frame.height,
-            frame.rgba.len(),
-            frame.timestamp
-        );
-    }
-    println!("captured {} frame(s)", frames);
-    Ok(())
-}
-
-fn capture_frame_err(index: u32, err: CaptureError) -> anyhow::Error {
-    eprintln!("frame {index}: {err}");
-    eprintln!("hint: {}", capture_error_remediation(&err));
-    if matches!(
-        err,
-        CaptureError::Portal(_) | CaptureError::PipeWire(_) | CaptureError::Unavailable(_)
-    ) {
-        eprintln!("run `wowsidecar-linux doctor` for capture readiness lines");
-    }
-    err.into()
 }
 
 fn daemon_exe_path() -> Result<PathBuf> {
