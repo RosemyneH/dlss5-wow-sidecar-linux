@@ -10,7 +10,7 @@ use sidecar_capture::{
 use sidecar_config::{default_config_path, load_config};
 use sidecar_core::DesktopWindow;
 use sidecar_neural::{
-    build_processor_from_config, process_frame, processor_id_for_config, FrameLayout,
+    build_processor_from_config, processor_id_for_config, FrameLayout, NeuralChain,
 };
 use sidecar_overlay::OverlayPresenter;
 use tracing::{info, warn};
@@ -192,6 +192,7 @@ fn run_pipeline_loop(
     };
 
     build_processor_from_config(&config)?;
+    let mut neural = NeuralChain::from_config(&config)?;
 
     let mut capture_fps = FpsCounter::new(Duration::from_secs(1));
     let mut overlay_fps = FpsCounter::new(Duration::from_secs(1));
@@ -206,6 +207,7 @@ fn run_pipeline_loop(
 
     while !stop_requested.load(Ordering::Acquire) {
         let (config, _) = load_config(&config_path);
+        let _ = neural.reload(&config);
         let pass_name = processor_id_for_config(&config).to_string();
 
         if let Some(p) = presenter.as_mut() {
@@ -229,7 +231,7 @@ fn run_pipeline_loop(
 
                 let layout = FrameLayout::new(frame.width, frame.height)?;
                 let mut work = vec![0u8; layout.byte_len()];
-                process_frame(&config, &layout, &frame.rgba, &mut work)?;
+                neural.process(&layout, &frame.rgba, &mut work)?;
 
                 frames += 1;
                 let mut presented = false;

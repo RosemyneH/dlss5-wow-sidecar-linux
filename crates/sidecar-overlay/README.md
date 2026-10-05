@@ -13,12 +13,12 @@ Experimental **smithay-client-toolkit** / `zwlr_layer_shell_v1` path for wlroots
 | | |
 |--|--|
 | **Feature** | `layer-shell` |
-| **Runtime** | `WOW_SIDECAR_OVERLAY_BACKEND=layer-shell` (or `layer_shell`, case-insensitive) |
+| **Runtime** | `WOWSIDECAR_OVERLAY_BACKEND=layer-shell` (or `layer_shell`; `WOW_SIDECAR_OVERLAY_BACKEND` alias) |
 | **Fallback** | winit (feature off, env unset, or init failure — logged as `layer-shell overlay unavailable`) |
 
 ```bash
 cargo build -p sidecar-overlay --features layer-shell
-WOW_SIDECAR_OVERLAY_BACKEND=layer-shell cargo run -p sidecar-runtime --bin wowsidecar-daemon
+WOWSIDECAR_OVERLAY_BACKEND=layer-shell cargo run -p sidecar-runtime --bin wowsidecar-daemon
 ```
 
 ### Behaviour
