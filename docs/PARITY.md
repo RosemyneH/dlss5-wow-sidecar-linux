@@ -14,7 +14,7 @@
 | P08 | Overlay daemon + IPC | wowsidecar.exe | partial | sidecar-runtime |
 | P09 | Hotkeys (no inject) | yes | partial | sidecar-runtime |
 | P10 | Status: FPS, GPU, capture | yes | partial | sidecar-runtime |
-| P11 | Neural pass | NGX+ReShade | partial (sharpen MVP wired) | sidecar-neural |
+| P11 | Neural pass | NGX+ReShade | partial (sharpen chain MVP: yes) | sidecar-neural |
 | P12 | Presets / tuning | yes | yes | sidecar-config |
 | P13 | Manager UI (5 sections) | ImGui | yes (egui; live IPC + setup rows) | wowsidecar-manager |
 | P14 | Setup / component install | yes | yes | sidecar-install |

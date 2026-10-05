@@ -6,6 +6,8 @@ license.workspace = true
 description = "Frame processors (shader MVP + future ONNX) for wowsidecar-linux"
 
 [dependencies]
+sidecar-config = { path = "../sidecar-config" }
 thiserror.workspace = true
 
 [dev-dependencies]
+sidecar-config = { path = "../sidecar-config" }

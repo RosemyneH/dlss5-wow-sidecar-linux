@@ -13,6 +13,7 @@ path = "src/main.rs"
 anyhow.workspace = true
 clap.workspace = true
 sidecar-config = { path = "../sidecar-config" }
+sidecar-neural = { path = "../sidecar-neural" }
 sidecar-capture = { path = "../sidecar-capture" }
 sidecar-core = { path = "../sidecar-core" }
 sidecar-runtime = { path = "../sidecar-runtime" }

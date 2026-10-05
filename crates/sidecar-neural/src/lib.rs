@@ -1,11 +1,18 @@
+mod config_bridge;
 mod frame;
 mod onnx;
 mod passthrough;
+mod pipeline;
 mod sharpen;
 
+pub use config_bridge::{
+    build_processor_from_config, neural_backend_from_config, neural_pass_count,
+    processor_id_for_config,
+};
 pub use frame::{FrameLayout, ProcessError, RgbaFrame};
 pub use onnx::{build_onnx_processor, OnnxProcessorConfig};
 pub use passthrough::Passthrough;
+pub use pipeline::{process_frame, run_pipeline};
 pub use sharpen::SimpleSharpen;
 
 use std::path::PathBuf;
@@ -14,8 +21,12 @@ use std::path::PathBuf;
 pub enum NeuralBackend {
     #[default]
     Passthrough,
-    SimpleSharpen { amount: f32 },
-    Onnx { model_path: PathBuf },
+    SimpleSharpen {
+        amount: f32,
+    },
+    Onnx {
+        model_path: PathBuf,
+    },
 }
 
 pub trait FrameProcessor: Send {
@@ -96,5 +107,39 @@ mod tests {
         std::fs::write(&model, b"stub").unwrap();
         let result = build_processor(NeuralBackend::Onnx { model_path: model });
         assert!(matches!(result, Err(ProcessError::OnnxUnavailable)));
+    }
+
+    #[test]
+    fn process_frame_triple_pass_differs_from_single() {
+        use sidecar_config::Config;
+
+        let layout = test_layout();
+        let input = checker_rgba(&layout);
+        let mut once = vec![0u8; layout.byte_len()];
+        let mut thrice = vec![0u8; layout.byte_len()];
+
+        let cfg_once = Config {
+            neural_passes: 1,
+            ..Config::default()
+        };
+        process_frame(&cfg_once, &layout, &input, &mut once).unwrap();
+
+        let cfg_thrice = Config {
+            neural_passes: 3,
+            ..Config::default()
+        };
+        process_frame(&cfg_thrice, &layout, &input, &mut thrice).unwrap();
+
+        assert_ne!(once, thrice);
+    }
+
+    #[test]
+    fn config_maps_reshade_to_sharpen_id() {
+        use sidecar_config::Config;
+
+        let mut cfg = Config::default();
+        assert_eq!(processor_id_for_config(&cfg), "simple_sharpen");
+        cfg.neural_pass = "passthrough".into();
+        assert_eq!(processor_id_for_config(&cfg), "passthrough");
     }
 }
