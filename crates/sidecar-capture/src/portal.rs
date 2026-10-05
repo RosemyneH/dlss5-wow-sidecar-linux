@@ -70,7 +70,36 @@ async fn run_portal_capture(
 
     let (portal_stream, fd) = open_portal().await?;
     let node_id = portal_stream.pipe_wire_node_id();
-    start_pipewire(node_id, fd, frame_tx)
+    start_pipewire(node_id, Some(fd), frame_tx)
+}
+
+pub fn spawn_direct_pipewire_stream(
+    node_id: u32,
+    hint: Option<WindowHint>,
+    frame_tx: Sender<Result<CaptureFrame, CaptureError>>,
+) -> Result<PortalHandle, CaptureError> {
+    if let Some(h) = &hint {
+        info!(
+            node_id,
+            title = %h.title,
+            compositor = %h.compositor,
+            address = %h.address,
+            "direct PipeWire capture (WOWSIDECAR_CAPTURE_NODE); portal dialog skipped"
+        );
+    } else {
+        info!(
+            node_id,
+            "direct PipeWire capture (WOWSIDECAR_CAPTURE_NODE); portal dialog skipped"
+        );
+    }
+
+    let join = thread::spawn(move || {
+        if let Err(e) = start_pipewire(node_id, None, frame_tx) {
+            warn!(error = %e, "direct pipewire capture ended");
+        }
+    });
+
+    Ok(PortalHandle { join })
 }
 
 async fn open_portal() -> Result<(PortalStream, OwnedFd), CaptureError> {
@@ -118,18 +147,23 @@ async fn open_portal() -> Result<(PortalStream, OwnedFd), CaptureError> {
 
 fn start_pipewire(
     node_id: u32,
-    fd: OwnedFd,
+    portal_fd: Option<OwnedFd>,
     frame_tx: Sender<Result<CaptureFrame, CaptureError>>,
 ) -> Result<(), CaptureError> {
     pw::init();
 
-    let mainloop = pw::main_loop::MainLoopBox::new(None)
-        .map_err(|e| CaptureError::PipeWire(e.to_string()))?;
+    let mainloop =
+        pw::main_loop::MainLoopBox::new(None).map_err(|e| CaptureError::PipeWire(e.to_string()))?;
     let context = pw::context::ContextBox::new(mainloop.loop_(), None)
         .map_err(|e| CaptureError::PipeWire(e.to_string()))?;
-    let core = context
-        .connect_fd(fd, None)
-        .map_err(|e| CaptureError::PipeWire(e.to_string()))?;
+    let core = match portal_fd {
+        Some(fd) => context
+            .connect_fd(fd, None)
+            .map_err(|e| CaptureError::PipeWire(e.to_string()))?,
+        None => context
+            .connect(None)
+            .map_err(|e| CaptureError::PipeWire(e.to_string()))?,
+    };
 
     let user_data = StreamUserData {
         format: spa::param::video::VideoInfoRaw::default(),

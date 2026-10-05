@@ -5,8 +5,8 @@ use tracing::debug;
 
 use crate::error::CaptureError;
 use crate::frame::CaptureFrame;
-use crate::hint::WindowHint;
-use crate::portal::{spawn_portal_stream, PortalHandle};
+use crate::hint::{parse_capture_node_from_env, WindowHint};
+use crate::portal::{spawn_direct_pipewire_stream, spawn_portal_stream, PortalHandle};
 use crate::pw_record::{spawn_pw_record_stream, PwRecordHandle};
 
 enum BackendHandle {
@@ -57,6 +57,27 @@ pub fn start_capture(window_hint: Option<WindowHint>) -> Result<FrameStream, Cap
     ensure_wayland()?;
 
     let (tx, rx) = mpsc::channel();
+
+    if let Some(node_id) = parse_capture_node_from_env() {
+        match spawn_direct_pipewire_stream(node_id, window_hint.clone(), tx.clone()) {
+            Ok(handle) => {
+                debug!(
+                    node_id,
+                    "capture backend: PipeWire node from WOWSIDECAR_CAPTURE_NODE"
+                );
+                return Ok(FrameStream {
+                    rx,
+                    backend: Some(BackendHandle::Portal(handle)),
+                });
+            }
+            Err(e) => {
+                debug!(
+                    error = %e,
+                    "WOWSIDECAR_CAPTURE_NODE path failed, trying portal ScreenCast"
+                );
+            }
+        }
+    }
 
     match spawn_portal_stream(window_hint.clone(), tx.clone()) {
         Ok(handle) => {
