@@ -12,9 +12,12 @@ rg '^\| P[0-9]+' "$ROOT/docs/PARITY.md" | while IFS= read -r line; do
   if [[ "$linux" == yes* ]]; then
     continue
   fi
-  echo "OPEN  $line"
+  id="$(echo "$line" | awk -F'|' '{gsub(/ /,"",$2); print $2}')"
+  echo "OPEN  $id: $linux"
 done
 echo "=== crates ==="
 ls -1 "$ROOT/crates" 2>/dev/null || true
 echo "=== build ==="
 cargo build --workspace 2>&1 | tail -3
+echo "=== build (sidecar-overlay/layer-shell) ==="
+cargo build -p sidecar-runtime --features sidecar-overlay/layer-shell 2>&1 | tail -3

@@ -9,8 +9,8 @@
 | P03 | `sidecar.toml` config | yes | yes | sidecar-config |
 | P04 | System checks / probes | yes | yes | sidecar-probes |
 | P05 | Injector filename scan | yes | yes | sidecar-probes |
-| P06 | PipeWire/window capture | WGC | partial (portal + auto PW node from Hypr/window hint; optional `WOWSIDECAR_CAPTURE_NODE`) | sidecar-capture |
-| P07 | Overlay present (AOT + track WoW rect) | D3D11 | partial (winit; no Wayland layer-shell) | sidecar-overlay |
+| P06 | PipeWire/window capture | WGC | partial (auto PW node from Hypr/Sway window hint, on by default; `WOWSIDECAR_CAPTURE_NODE` override; falls back to portal picker → `pw-record`; node match is best-effort) | sidecar-capture |
+| P07 | Overlay present (AOT + track WoW rect) | D3D11 | partial (winit AOT default; opt-in wlroots layer-shell via `sidecar-overlay/layer-shell` feature + `WOW_SIDECAR_OVERLAY_BACKEND=layer-shell`, off in default builds; single-output anchor/margin) | sidecar-overlay |
 | P08 | Overlay daemon + IPC | wowsidecar.exe | yes (Unix socket + capture→neural→overlay thread; mock/headless) | sidecar-runtime |
 | P09 | Hotkeys (no inject) | yes | yes | sidecar-runtime |
 | P10 | Status: FPS, GPU, capture | yes | yes | sidecar-runtime |
