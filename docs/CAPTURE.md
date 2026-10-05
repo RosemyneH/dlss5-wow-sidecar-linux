@@ -42,6 +42,8 @@ Portal failures are sent on the frame channel (not only as a silent timeout). `c
 
 Before the picker opens, `AvailableSourceTypes` is queried: monitor-only backends (e.g. `xdg-desktop-portal-wlr`) are requested as monitor-only with a warning instead of failing in the dialog.
 
+After you approve sharing once, the portal **restore token** is stored at `~/.config/wowsidecar-linux/screencast-restore.token` (`PersistMode::ExplicitlyRevoked`). Later runs reuse it when the compositor allows, so you are not prompted every session. Delete that file to force a fresh picker.
+
 ### Multi-monitor
 
 If you share a **monitor** while a WoW window hint is known, its portal position/size is checked against the WoW window centre. Sharing an output that does not contain WoW fails with a `multi-monitor:` error listing both rectangles; sharing the right monitor works but logs that picking the window avoids capturing other surfaces. Window shares skip this check.

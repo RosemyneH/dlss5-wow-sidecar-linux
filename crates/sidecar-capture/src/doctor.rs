@@ -3,6 +3,7 @@ use std::process::Command;
 use sidecar_core::{list_wow_windows, DesktopWindow};
 
 use crate::hint::{parse_capture_node_from_env, ENV_CAPTURE_ADDRESS, ENV_CAPTURE_NODE};
+use crate::portal_restore::load_screencast_restore_token;
 use crate::pw_node::{capture_auto_node_enabled, ENV_CAPTURE_AUTO_NODE};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -137,10 +138,17 @@ pub fn capture_doctor_report() -> Vec<CaptureDoctorLine> {
             "capture source",
             format!("{ENV_CAPTURE_NODE}={node} (skips portal picker while the node is alive)"),
         ),
-        None if capture_auto_node_enabled() => CaptureDoctorLine::ok(
-            "capture source",
-            "portal picker, reusing a live WoW screencast node when one exists",
-        ),
+        None if capture_auto_node_enabled() => {
+            let restore = load_screencast_restore_token()
+                .map(|_| "saved ScreenCast restore token; ")
+                .unwrap_or_default();
+            CaptureDoctorLine::ok(
+                "capture source",
+                format!(
+                    "{restore}portal picker on first grant, auto PW node reuse when a cast exists"
+                ),
+            )
+        }
         None => CaptureDoctorLine::ok(
             "capture source",
             format!("portal picker every run ({ENV_CAPTURE_AUTO_NODE}=0)"),
