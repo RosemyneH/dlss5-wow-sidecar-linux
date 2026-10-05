@@ -132,7 +132,11 @@ fn main() -> Result<()> {
             println!("wow windows: {}", windows.len());
             println!("pipewire: {}", which("pw-dump"));
             println!("hyprctl: {}", which("hyprctl"));
-            println!("portal: {}", which("xdg-desktop-portal"));
+            println!(
+                "portal: {}",
+                sidecar_capture::resolve_portal_frontend_binary()
+                    .unwrap_or_else(|| "missing".into())
+            );
             println!("\ncapture (P06):");
             for line in capture_doctor_report() {
                 println!("  {}", format_doctor_line(&line));

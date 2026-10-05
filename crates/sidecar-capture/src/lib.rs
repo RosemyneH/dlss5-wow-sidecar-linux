@@ -15,8 +15,8 @@ pub use mock::{
 };
 
 pub use doctor::{
-    capture_doctor_report, doctor_level_char, format_doctor_line, wayland_ok, CaptureDoctorLevel,
-    CaptureDoctorLine,
+    capture_doctor_report, doctor_level_char, format_doctor_line, resolve_portal_frontend_binary,
+    wayland_ok, CaptureDoctorLevel, CaptureDoctorLine,
 };
 pub use error::{capture_error_remediation, enrich_portal_error, CaptureError};
 pub use frame::CaptureFrame;

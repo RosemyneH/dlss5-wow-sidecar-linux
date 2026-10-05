@@ -346,6 +346,10 @@ fn command_stdout(cmd: &str, args: &[&str]) -> Option<String> {
         .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
+pub fn resolve_portal_frontend_binary() -> Option<String> {
+    find_executable("xdg-desktop-portal")
+}
+
 fn find_executable(cmd: &str) -> Option<String> {
     which(cmd).or_else(|| {
         ["/usr/lib", "/usr/libexec", "/usr/lib/xdg-desktop-portal"]
