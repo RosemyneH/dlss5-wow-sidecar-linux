@@ -4601,10 +4601,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
- "serde_json",
- "sidecar-config",
  "sidecar-core",
- "sidecar-runtime",
  "tracing",
  "tracing-subscriber",
 ]

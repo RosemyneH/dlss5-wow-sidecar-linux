@@ -1,0 +1,29 @@
+[package]
+name = "sidecar-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Overlay daemon, manager IPC, hotkeys, and runtime status (Linux)"
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "wowsidecar-daemon"
+path = "src/bin/wowsidecar-daemon.rs"
+
+[features]
+default = []
+hotkeys-evdev = ["dep:evdev"]
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+evdev = { version = "0.13", optional = true }
+
+[dev-dependencies]
+tempfile = "3"
