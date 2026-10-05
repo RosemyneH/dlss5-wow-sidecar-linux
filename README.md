@@ -4,6 +4,17 @@ Linux-native companion to [dlss5-wow-sidecar](https://github.com/xilla420/dlss5-
 
 Inspired by the Windows tool’s safety model (out-of-process only). This is **not** a fork of its binaries — it is a new stack for **Hyprland / Sway / PipeWire**.
 
+## Parity workflow
+
+Windows reference: `~/Repos/dlss5-wow-sidecar`. Checklist: [docs/PARITY.md](docs/PARITY.md).
+
+```bash
+./scripts/parity-status.sh    # open items + build
+./scripts/parity-loop.sh 10   # test + fail until P06–P18 done (agent loop)
+```
+
+Ten parallel workstreams (config, probes, capture, overlay, runtime, neural, presets, manager UI, install, CI) each own a `crates/*` directory to reduce merge conflicts.
+
 ## Status (v0.1)
 
 | Milestone | State |
