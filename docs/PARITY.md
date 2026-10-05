@@ -11,9 +11,9 @@
 | P05 | Injector filename scan | yes | yes | sidecar-probes |
 | P06 | PipeWire/window capture | WGC | partial (portal + `WOWSIDECAR_CAPTURE_NODE` direct PW; Hypr hint env) | sidecar-capture |
 | P07 | Overlay present (AOT + track WoW rect) | D3D11 | partial (winit; no Wayland layer-shell) | sidecar-overlay |
-| P08 | Overlay daemon + IPC | wowsidecar.exe | partial (`serve`/`start`, Unix socket) | sidecar-runtime |
-| P09 | Hotkeys (no inject) | yes | partial | sidecar-runtime |
-| P10 | Status: FPS, GPU, capture | yes | partial | sidecar-runtime |
+| P08 | Overlay daemon + IPC | wowsidecar.exe | yes (Unix socket + capture→neural→overlay thread; mock/headless) | sidecar-runtime |
+| P09 | Hotkeys (no inject) | yes | yes | sidecar-runtime |
+| P10 | Status: FPS, GPU, capture | yes | yes | sidecar-runtime |
 | P11 | Neural pass | NGX+ReShade | partial (sharpen chain MVP: yes) | sidecar-neural |
 | P12 | Presets / tuning | yes | yes | sidecar-config |
 | P13 | Manager UI (5 sections) | ImGui | yes (egui; live IPC + setup rows) | wowsidecar-manager |

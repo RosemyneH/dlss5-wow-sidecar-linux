@@ -10,10 +10,7 @@ pub struct FpsCounter {
 
 impl FpsCounter {
     pub fn new(window: Duration) -> Self {
-        Self {
-            window,
-            ..Default::default()
-        }
+        Self { window, ..Default::default() }
     }
 
     pub fn tick_frame(&mut self) -> Option<f64> {
@@ -33,12 +30,26 @@ impl FpsCounter {
     pub fn fps(&self) -> f64 {
         self.last_fps
     }
+}
 
-    pub fn stub_pulse(&mut self) -> f64 {
-        let _ = self.tick_frame();
-        if self.last_fps == 0.0 {
-            self.last_fps = 60.0;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::thread;
+
+    #[test]
+    fn reports_zero_before_first_window() {
+        assert_eq!(FpsCounter::new(Duration::from_millis(50)).fps(), 0.0);
+    }
+
+    #[test]
+    fn measures_frames_per_second_over_window() {
+        let mut c = FpsCounter::new(Duration::from_millis(40));
+        for _ in 0..8 {
+            c.tick_frame();
         }
-        self.last_fps
+        thread::sleep(Duration::from_millis(45));
+        assert!(c.tick_frame().is_some());
+        assert!(c.fps() > 10.0);
     }
 }

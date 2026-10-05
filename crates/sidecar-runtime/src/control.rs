@@ -2,6 +2,7 @@ use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -20,6 +21,7 @@ pub struct ControlServer {
     overlay_visible: Arc<Mutex<bool>>,
     hud_visible: Arc<Mutex<bool>>,
     stop_flag: Arc<Mutex<bool>>,
+    pipeline_stop: Arc<AtomicBool>,
     handler: Arc<CommandHandler>,
 }
 
@@ -62,8 +64,13 @@ impl ControlServer {
             overlay_visible: Arc::new(Mutex::new(true)),
             hud_visible: Arc::new(Mutex::new(false)),
             stop_flag: Arc::new(Mutex::new(false)),
+            pipeline_stop: Arc::new(AtomicBool::new(false)),
             handler: Arc::new(handler),
         })
+    }
+
+    pub fn pipeline_stop_requested(&self) -> bool {
+        self.pipeline_stop.load(Ordering::Acquire)
     }
 
     pub fn socket_path(&self) -> &Path {
@@ -88,12 +95,13 @@ impl ControlServer {
         *slot = status;
     }
 
-    pub fn tick_fps_stubs(&self, capture: &mut FpsCounter, overlay: &mut FpsCounter) {
-        let capture_fps = capture.stub_pulse();
-        let overlay_fps = overlay.stub_pulse();
+    pub fn tick_fps(&self, capture: &mut FpsCounter, overlay: &mut FpsCounter) {
+        if self.pipeline_stop.load(Ordering::Acquire) { return; }
+        capture.tick_frame();
+        overlay.tick_frame();
         let mut status = self.status.lock().unwrap().clone();
-        status.capture_fps = capture_fps;
-        status.fps = overlay_fps;
+        status.capture_fps = capture.fps();
+        status.fps = overlay.fps();
         status.frames = status.frames.saturating_add(1);
         self.publish(status);
     }
@@ -154,7 +162,7 @@ impl ControlServer {
             SidecarCommand::Panic => {
                 *self.overlay_visible.lock().unwrap() = false;
                 *self.hud_visible.lock().unwrap() = false;
-                *self.stop_flag.lock().unwrap() = true;
+                self.pipeline_stop.store(true, Ordering::Release);
             }
         }
         self.sync_status_flags();
@@ -201,22 +209,6 @@ pub mod client {
 
     pub fn send(command: SidecarCommand) -> bool {
         send_at(&control_socket_path(), command).unwrap_or(false)
-    }
-
-
-    pub fn send_toggle(command: SidecarCommand) -> bool {
-        let resolved = match command {
-            SidecarCommand::HideOverlay => {
-                let visible = read().map(|s| s.overlay_visible != 0).unwrap_or(true);
-                if visible { SidecarCommand::HideOverlay } else { SidecarCommand::ShowOverlay }
-            }
-            SidecarCommand::HideHud => {
-                let visible = read().map(|s| s.hud_visible != 0).unwrap_or(false);
-                if visible { SidecarCommand::HideHud } else { SidecarCommand::ShowHud }
-            }
-            other => other,
-        };
-        send(resolved)
     }
 
     pub fn send_at(path: &Path, command: SidecarCommand) -> anyhow::Result<bool> {
@@ -290,7 +282,7 @@ pub fn run_daemon_loop(server: &ControlServer) -> anyhow::Result<()> {
 
     while !server.should_stop() {
         while server.pump_once()? {}
-        server.tick_fps_stubs(&mut capture_fps, &mut overlay_fps);
+        server.tick_fps(&mut capture_fps, &mut overlay_fps);
         std::thread::sleep(Duration::from_millis(16));
     }
 
@@ -303,4 +295,4 @@ pub fn ensure_runtime_dir() -> anyhow::Result<()> {
     Ok(())
 }
 
-pub use client::{is_running, read, read_at, send, send_at, send_toggle, start_daemon, status, stop};
+pub use client::{is_running, read, read_at, send, send_at, start_daemon, status, stop};

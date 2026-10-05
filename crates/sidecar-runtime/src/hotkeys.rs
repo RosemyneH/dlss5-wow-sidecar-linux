@@ -28,40 +28,6 @@ impl Default for HotkeyBindings {
     }
 }
 
-impl HotkeyBindings {
-    pub fn from_config(hotkeys: &sidecar_config::Hotkeys) -> Self {
-        fn opt(s: &str) -> Option<String> {
-            if s.is_empty() {
-                None
-            } else {
-                Some(s.to_string())
-            }
-        }
-        Self {
-            start_stop: opt(&hotkeys.start_stop),
-            toggle_overlay: opt(&hotkeys.toggle_overlay),
-            toggle_hud: opt(&hotkeys.toggle_hud),
-            panic_combo: Some("Ctrl+Alt+Backspace".into()),
-        }
-    }
-
-    pub fn apply_evdev_default_policy(self) -> Self {
-        #[cfg(all(feature = "hotkeys-evdev-panic", not(feature = "hotkeys-evdev-full")))]
-        {
-            return Self {
-                start_stop: None,
-                toggle_overlay: None,
-                toggle_hud: None,
-                panic_combo: self.panic_combo,
-            };
-        }
-        #[cfg(not(all(feature = "hotkeys-evdev-panic", not(feature = "hotkeys-evdev-full"))))]
-        {
-            self
-        }
-    }
-}
-
 pub fn execute_panic() -> bool {
     execute_panic_with(|cmd| send(cmd))
 }
@@ -92,7 +58,9 @@ fn run_hotkeys(stop_flag: Arc<Mutex<bool>>, bindings: HotkeyBindings) -> anyhow:
 fn run_evdev(stop_flag: Arc<Mutex<bool>>, bindings: HotkeyBindings) -> anyhow::Result<()> {
     use evdev::{Device, EventType, KeyCode, KeyEvent};
 
-    let mut devices: Vec<Device> = evdev::enumerate().map(|(_, d)| d).collect();
+    let mut devices: Vec<Device> = evdev::enumerate()
+        .filter_map(|(path, _)| Device::open(path).ok())
+        .collect();
     if devices.is_empty() {
         anyhow::bail!("no evdev nodes readable");
     }
@@ -128,24 +96,15 @@ fn run_evdev(stop_flag: Arc<Mutex<bool>>, bindings: HotkeyBindings) -> anyhow::R
                 if combo_matches(panic, &pressed, code) {
                     info!("panic hotkey");
                     execute_panic();
-                    *stop_flag.lock().unwrap() = true;
                     continue;
                 }
                 if combo_matches_opt(toggle_overlay, &pressed, code) {
                     let visible = read().map(|s| s.overlay_visible != 0).unwrap_or(true);
-                    let _ = send(if visible {
-                        SidecarCommand::HideOverlay
-                    } else {
-                        SidecarCommand::ShowOverlay
-                    });
+                    let _ = send(if visible { SidecarCommand::HideOverlay } else { SidecarCommand::ShowOverlay });
                 }
                 if combo_matches_opt(toggle_hud, &pressed, code) {
                     let visible = read().map(|s| s.hud_visible != 0).unwrap_or(false);
-                    let _ = send(if visible {
-                        SidecarCommand::HideHud
-                    } else {
-                        SidecarCommand::ShowHud
-                    });
+                    let _ = send(if visible { SidecarCommand::HideHud } else { SidecarCommand::ShowHud });
                 }
                 if combo_matches_opt(start_stop, &pressed, code) {
                     if is_running() {
@@ -163,38 +122,22 @@ fn run_evdev(stop_flag: Arc<Mutex<bool>>, bindings: HotkeyBindings) -> anyhow::R
 use evdev::KeyCode;
 
 #[cfg(feature = "hotkeys-evdev")]
-fn combo_matches(
-    spec: &str,
-    pressed: &std::collections::HashSet<KeyCode>,
-    trigger: KeyCode,
-) -> bool {
+fn combo_matches(spec: &str, pressed: &std::collections::HashSet<KeyCode>, trigger: KeyCode) -> bool {
     combo_matches_opt(Some(spec), pressed, trigger)
 }
 
 #[cfg(feature = "hotkeys-evdev")]
-fn combo_matches_opt(
-    spec: Option<&str>,
-    pressed: &std::collections::HashSet<KeyCode>,
-    trigger: KeyCode,
-) -> bool {
-    let Some(spec) = spec else {
-        return false;
-    };
-    let Some((mods, key)) = parse_combo(spec) else {
-        return false;
-    };
-    if trigger != key {
-        return false;
-    }
+fn combo_matches_opt(spec: Option<&str>, pressed: &std::collections::HashSet<KeyCode>, trigger: KeyCode) -> bool {
+    let Some(spec) = spec else { return false };
+    let Some((mods, key)) = parse_combo(spec) else { return false };
+    if trigger != key { return false }
     mods.iter().all(|m| pressed.contains(m))
 }
 
 #[cfg(feature = "hotkeys-evdev")]
 fn parse_combo(spec: &str) -> Option<(Vec<KeyCode>, KeyCode)> {
     let parts: Vec<&str> = spec.split('+').map(|s| s.trim()).collect();
-    if parts.is_empty() {
-        return None;
-    }
+    if parts.is_empty() { return None }
     let mut mods = Vec::new();
     for part in &parts[..parts.len().saturating_sub(1)] {
         mods.push(parse_modifier(part)?);
@@ -230,9 +173,7 @@ fn parse_key(name: &str) -> Option<KeyCode> {
 #[cfg(all(test, feature = "hotkeys-evdev"))]
 mod tests {
     use std::collections::HashSet;
-
     use evdev::KeyCode;
-
     use super::combo_matches;
 
     #[test]
