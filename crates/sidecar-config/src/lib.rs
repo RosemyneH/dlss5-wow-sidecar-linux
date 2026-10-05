@@ -8,7 +8,9 @@ mod serialize;
 mod strength;
 
 pub use config::{reset_rendering_settings, Config, Hotkeys, NeuralSettings, UiRect};
-pub use hotkey::{format_hotkey, normalize_hotkey_string, parse_hotkey, Hotkey};
+pub use hotkey::{
+    format_hotkey, hotkey_to_portal_trigger, normalize_hotkey_string, parse_hotkey, Hotkey,
+};
 pub use io::{default_config_path, load_config, save_config, sidecar_dir};
 pub use language::parse_language_tag;
 pub use parse::parse_config;

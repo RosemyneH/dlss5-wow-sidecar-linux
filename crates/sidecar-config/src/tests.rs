@@ -324,6 +324,19 @@ fn neural_passes_clamped() {
 }
 
 #[test]
+fn hotkey_portal_trigger() {
+    use crate::hotkey_to_portal_trigger;
+    assert_eq!(
+        hotkey_to_portal_trigger("Ctrl+Alt+D"),
+        Some("<Control><Alt><D>".into())
+    );
+    assert_eq!(
+        hotkey_to_portal_trigger("Ctrl+Alt+Backspace"),
+        Some("<Control><Alt><BackSpace>".into())
+    );
+}
+
+#[test]
 fn hotkeys_defaults_and_typo() {
     let (defaults, warnings) = parse_config("");
     assert!(warnings.is_empty());

@@ -1,15 +1,19 @@
 mod control;
 mod fps;
 mod hotkeys;
+mod pipeline;
 mod protocol;
 mod socket_path;
 
 pub use control::{
-    ensure_runtime_dir, is_running, read, read_at, run_daemon_loop, send, send_at, start_daemon,
-    status, stop, ControlServer,
+    ensure_runtime_dir, is_running, read, read_at, run_daemon_loop, send, send_at, send_toggle,
+    start_daemon, start_overlay, start_overlay_at, status, stop, ControlServer,
 };
 pub use fps::FpsCounter;
-pub use hotkeys::{execute_panic, execute_panic_with, spawn_hotkey_thread, HotkeyBindings};
+pub use hotkeys::{
+    execute_panic, execute_panic_with, spawn_hotkey_thread, HotkeyBindings,
+};
+pub use pipeline::Pipeline;
 pub use protocol::{ControlRequest, ControlResponse, SidecarCommand, SidecarStatus};
 pub use socket_path::{
     control_socket_path, control_socket_path_in, runtime_dir, CONTROL_SOCKET_NAME, RUNTIME_DIR_NAME,
@@ -30,6 +34,10 @@ pub fn run_daemon() -> anyhow::Result<()> {
         tracing::info!(?cmd, "daemon command");
     }))?;
 
-    spawn_hotkey_thread(server.stop_flag(), HotkeyBindings::default());
+    let (cfg, _) = sidecar_config::parse_config("");
+    let bindings = HotkeyBindings::from_config(&cfg.hotkeys).apply_evdev_default_policy();
+    #[cfg(feature = "hotkeys-evdev")]
+    spawn_hotkey_thread(server.stop_flag(), bindings);
+
     run_daemon_loop(&server)
 }

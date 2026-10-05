@@ -13,7 +13,7 @@ name = "wowsidecar-daemon"
 path = "src/bin/wowsidecar-daemon.rs"
 
 [features]
-default = ["hotkeys-evdev"]
+default = []
 hotkeys-evdev = ["dep:evdev"]
 
 [dependencies]
