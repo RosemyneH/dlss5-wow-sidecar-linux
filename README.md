@@ -44,7 +44,7 @@ cargo build --release
 
 4. **Environment check** — `./target/release/wowsidecar-linux doctor` (PipeWire, portal, preset, daemon socket path).
 
-5. **Optional: validate capture** — `./target/release/wowsidecar-linux capture-test --frames 10` (portal picker; uses WoW window hint when available).
+5. **Optional: validate capture** — `./target/release/wowsidecar-linux capture-test --frames 10` (portal picker; WoW window hint when available). Optional direct PipeWire node: `WOWSIDECAR_CAPTURE_NODE=<id>` — see `docs/CAPTURE.md`.
 
 6. **Run the sidecar daemon** (foreground, recommended for first run):
    ```bash
@@ -63,6 +63,7 @@ cargo build --release
 ./target/release/wowsidecar-linux windows
 ./target/release/wowsidecar-linux doctor
 ./target/release/wowsidecar-linux capture-test --frames 10
+# Optional PipeWire node (skip portal): WOWSIDECAR_CAPTURE_NODE=<id> — see docs/CAPTURE.md
 ./target/release/wowsidecar-linux serve
 ./target/release/wowsidecar-linux status
 cargo build -p wowsidecar-manager && ./target/release/wowsidecar-manager
