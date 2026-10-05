@@ -12,6 +12,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
+sidecar-config = { path = "../sidecar-config" }
 sidecar-core = { path = "../sidecar-core" }
 tracing.workspace = true
 tracing-subscriber.workspace = true

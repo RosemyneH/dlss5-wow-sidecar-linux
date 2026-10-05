@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use sidecar_config::{matching_preset, parse_config, PRESETS};
 use sidecar_core::{SmartScanOptions, list_wow_windows, smart_scan_installs};
 use tracing_subscriber::EnvFilter;
 
@@ -87,7 +88,16 @@ fn main() -> Result<()> {
             println!("pipewire: {}", which("pw-dump"));
             println!("hyprctl: {}", which("hyprctl"));
             println!("portal: {}", which("xdg-desktop-portal"));
-            println!("\nneural pass: not implemented yet (see docs/ROADMAP.md)");
+            let (cfg, _) = parse_config("");
+            let preset_name = matching_preset(&cfg)
+                .map(|i| PRESETS[i].name)
+                .unwrap_or("custom");
+            println!(
+                "\nconfig: preset={} neural_passes={} (1x=1, 2x=2, 3x=3 passes)",
+                preset_name,
+                cfg.neural_passes
+            );
+            println!("neural pass runtime: not implemented yet (see docs/ROADMAP.md)");
         }
     }
 
