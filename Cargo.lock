@@ -3295,6 +3295,7 @@ dependencies = [
  "ashpd 0.13.13",
  "pipewire",
  "sidecar-core",
+ "tempfile",
  "thiserror 2.0.21",
  "tokio",
  "tracing",
