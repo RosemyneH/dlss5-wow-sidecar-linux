@@ -3,6 +3,7 @@ mod frame;
 mod hint;
 mod mock;
 mod portal;
+mod pw_node;
 mod pw_record;
 mod stream;
 
@@ -18,6 +19,11 @@ pub use hint::{
     normalize_hyprland_address, parse_capture_hint_from_env, parse_capture_node_from_env,
     parse_capture_node_value, pick_wow_hint, WindowHint, ENV_CAPTURE_ADDRESS, ENV_CAPTURE_HINT,
     ENV_CAPTURE_NODE,
+};
+pub use pw_node::{
+    capture_auto_node_enabled, discover_capture_node_for_hint, hint_match_score,
+    is_video_capture_node, pick_capture_node_from_candidates, resolve_capture_node_id,
+    PwNodeCandidate, ENV_CAPTURE_AUTO_NODE,
 };
 pub use stream::{start_capture_or_mock, start_mock_stream, FrameStream};
 

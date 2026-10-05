@@ -5,7 +5,8 @@ use tracing::debug;
 
 use crate::error::CaptureError;
 use crate::frame::CaptureFrame;
-use crate::hint::{parse_capture_node_from_env, WindowHint};
+use crate::hint::WindowHint;
+use crate::pw_node::resolve_capture_node_id;
 use crate::portal::{spawn_direct_pipewire_stream, spawn_portal_stream, PortalHandle};
 use crate::pw_record::{spawn_pw_record_stream, PwRecordHandle};
 
@@ -75,12 +76,12 @@ pub fn start_capture(window_hint: Option<WindowHint>) -> Result<FrameStream, Cap
 
     let (tx, rx) = mpsc::channel();
 
-    if let Some(node_id) = parse_capture_node_from_env() {
+    if let Some(node_id) = resolve_capture_node_id(window_hint.as_ref()) {
         match spawn_direct_pipewire_stream(node_id, window_hint.clone(), tx.clone()) {
             Ok(handle) => {
                 debug!(
                     node_id,
-                    "capture backend: PipeWire node from WOWSIDECAR_CAPTURE_NODE"
+                    "capture backend: PipeWire node (env override or Hypr/window hint match)"
                 );
                 return Ok(FrameStream {
                     rx,

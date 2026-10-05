@@ -10,16 +10,22 @@
 
 Pass a `WindowHint` from `wow_window_hint()` / `sidecar_core::list_wow_windows()` so the CLI can log which WoW surface to select. Hyprland window addresses from `hyprctl` (`0x…` hex) are normalized when matching portal or PipeWire node metadata (`identifier_matches_hint`, `hyprland_addresses_equal`).
 
-## Skip the portal dialog (repeat capture)
+## Automatic PipeWire node (no env vars)
 
-After a successful ScreenCast session, note the PipeWire node id from logs (or `pw-cli ls Node | rg -i screen`). If that **screencast node is still alive** in your session, you can reconnect without the picker:
+When WoW is discovered (`wow_window_hint()` / `list_wow_windows()`), `start_capture` **scans the PipeWire registry** for an active video screencast node whose metadata matches the Hyprland address, title, or class. If exactly one capture node exists in the session, it is used when you have a window hint.
+
+This reconnects to an **existing** portal screencast without `WOWSIDECAR_CAPTURE_NODE` or address overrides. Set `WOWSIDECAR_CAPTURE_AUTO_NODE=0` to disable auto-selection.
+
+## Skip the portal dialog (manual node id)
+
+After a successful ScreenCast session, note the PipeWire node id from logs (or `pw-cli ls Node | rg -i screen`). If that **screencast node is still alive** in your session, you can pin it explicitly:
 
 ```bash
 export WOWSIDECAR_CAPTURE_NODE=123   # decimal PipeWire node id
 wowsidecar-linux capture-test --frames 10
 ```
 
-`start_capture` connects to the **default PipeWire socket** and links to that node. If the node is gone, unset the variable and use the portal path again.
+`WOWSIDECAR_CAPTURE_NODE` overrides auto-discovery. If the node is gone, unset the variable and use the portal path again.
 
 ## Window hint overrides (Hyprland / Sway)
 
