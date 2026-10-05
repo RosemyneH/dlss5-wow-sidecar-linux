@@ -497,12 +497,17 @@ impl OverlayPresenter {
 
 #[cfg(feature = "layer-shell")]
 fn layer_shell_backend_requested() -> bool {
-    std::env::var("WOW_SIDECAR_OVERLAY_BACKEND")
-        .map(|v| {
-            let v = v.to_ascii_lowercase();
-            v == "layer-shell" || v == "layer_shell"
-        })
+    overlay_backend_env()
+        .map(|v| v == "layer-shell" || v == "layer_shell")
         .unwrap_or(false)
+}
+
+#[cfg(feature = "layer-shell")]
+fn overlay_backend_env() -> Option<String> {
+    std::env::var("WOWSIDECAR_OVERLAY_BACKEND")
+        .or_else(|_| std::env::var("WOW_SIDECAR_OVERLAY_BACKEND"))
+        .ok()
+        .map(|v| v.to_ascii_lowercase())
 }
 
 fn apply_window_chrome(window: &Window, desktop: &DesktopWindow, delta: ChromeDelta) {
@@ -561,5 +566,103 @@ mod tests {
     fn show_frame_rejects_out_of_bounds_blit() {
         let err = validate_frame_blit(64, 64, &[0u8; 64], 62, 62, 4, 4).expect_err("oob");
         assert!(matches!(err, OverlayError::OutOfBounds { .. }));
+    }
+
+    fn wow(x: i32, y: i32, w: u32, h: u32, fullscreen: bool) -> DesktopWindow {
+        DesktopWindow {
+            compositor: "test".into(),
+            address: "0x1".into(),
+            title: "World of Warcraft".into(),
+            class: "gxwindow".into(),
+            x,
+            y,
+            width: w,
+            height: h,
+            fullscreen,
+        }
+    }
+
+    #[test]
+    fn physical_extent_scales_logical_probe_rect() {
+        let e = physical_extent(&wow(100, 50, 1280, 720, false), 1.5);
+        assert_eq!(e.position, PhysicalPosition::new(150, 75));
+        assert_eq!(e.size, PhysicalSize::new(1920, 1080));
+        let e = physical_extent(&wow(-10, 0, 800, 600, false), 1.0);
+        assert_eq!(e.position, PhysicalPosition::new(-10, 0));
+        assert_eq!(e.size, PhysicalSize::new(800, 600));
+    }
+
+    #[test]
+    fn chrome_delta_isolates_move_resize_fullscreen() {
+        let base = wow(0, 0, 800, 600, false);
+        assert!(!ChromeDelta::between(&base, &base).any());
+        assert_eq!(
+            ChromeDelta::between(&base, &wow(5, 0, 800, 600, false)),
+            ChromeDelta {
+                moved: true,
+                resized: false,
+                fullscreen: false,
+            }
+        );
+        assert_eq!(
+            ChromeDelta::between(&base, &wow(0, 0, 1024, 600, false)),
+            ChromeDelta {
+                moved: false,
+                resized: true,
+                fullscreen: false,
+            }
+        );
+        assert_eq!(
+            ChromeDelta::between(&base, &wow(0, 0, 800, 600, true)),
+            ChromeDelta {
+                moved: false,
+                resized: false,
+                fullscreen: true,
+            }
+        );
+    }
+
+    #[test]
+    fn geometry_poller_throttles_probe() {
+        let mut p = GeometryPoller::new(Duration::from_millis(50));
+        let t0 = Instant::now();
+        assert!(p.due(t0));
+        assert!(!p.due(t0 + Duration::from_millis(10)));
+        assert!(p.due(t0 + Duration::from_millis(50)));
+        assert!(!p.due(t0 + Duration::from_millis(60)));
+    }
+
+    #[test]
+    fn backing_resize_reports_change() {
+        let mut b = Backing::new(PhysicalSize::new(4, 4));
+        assert!(!b.resize(PhysicalSize::new(4, 4)));
+        assert!(b.resize(PhysicalSize::new(8, 2)));
+        assert_eq!((b.width, b.height, b.pixels.len()), (8, 2, 16));
+    }
+
+    #[test]
+    fn backing_blit_converts_rgba_and_clips() {
+        let mut b = Backing::new(PhysicalSize::new(2, 2));
+        let frame = PendingFrame {
+            pixels: [[0x11, 0x22, 0x33, 0xff]; 4].concat(),
+            x: 1,
+            y: 1,
+            w: 2,
+            h: 2,
+        };
+        b.blit_rgba(&frame);
+        assert_eq!(b.pixels, vec![0, 0, 0, 0xff11_2233]);
+    }
+
+    #[test]
+    fn backing_copy_into_handles_stride_mismatch() {
+        let mut b = Backing::new(PhysicalSize::new(2, 2));
+        b.pixels = vec![1, 2, 3, 4];
+        let mut wide = vec![9; 6];
+        b.copy_into(&mut wide, 3, 2);
+        assert_eq!(wide, vec![1, 2, 0, 3, 4, 0]);
+        let mut narrow = vec![9; 3];
+        b.copy_into(&mut narrow, 1, 3);
+        assert_eq!(narrow, vec![1, 3, 0]);
     }
 }
