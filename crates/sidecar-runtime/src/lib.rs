@@ -34,7 +34,11 @@ pub fn run_daemon() -> anyhow::Result<()> {
         tracing::info!(?cmd, "daemon command");
     }))?;
 
-    let (cfg, _) = sidecar_config::parse_config("");
+    let (cfg, warnings) =
+        sidecar_config::load_config(&sidecar_config::default_config_path());
+    for w in warnings {
+        tracing::warn!("config: {w}");
+    }
     let bindings = HotkeyBindings::from_config(&cfg.hotkeys).apply_evdev_default_policy();
     #[cfg(feature = "hotkeys-evdev")]
     spawn_hotkey_thread(server.stop_flag(), bindings);

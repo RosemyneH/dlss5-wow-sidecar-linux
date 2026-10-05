@@ -13,8 +13,10 @@ name = "wowsidecar-daemon"
 path = "src/bin/wowsidecar-daemon.rs"
 
 [features]
-default = []
+default = ["hotkeys-evdev-panic"]
 hotkeys-evdev = ["dep:evdev"]
+hotkeys-evdev-panic = ["hotkeys-evdev"]
+hotkeys-evdev-full = ["hotkeys-evdev"]
 
 [dependencies]
 anyhow.workspace = true

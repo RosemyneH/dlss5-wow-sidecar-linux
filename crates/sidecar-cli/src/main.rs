@@ -218,7 +218,7 @@ fn main() -> Result<()> {
                     String::new()
                 };
                 println!(
-                    "pid={} overlay={} hud={} fps={:.1} capture_fps={:.1} frames={} pass={}{}{}",
+                    "pid={} overlay={} hud={} fps={:.1} capture_fps={:.1} frames={} pass={}{}{}variant={}",
                     st.process_id,
                     st.overlay_visible,
                     st.hud_visible,
@@ -227,7 +227,8 @@ fn main() -> Result<()> {
                     st.frames,
                     st.pass_name,
                     vram,
-                    format!(" variant={}", st.runtime_variant)
+                    if vram.is_empty() { "" } else { " " },
+                    st.runtime_variant
                 );
             }
         }

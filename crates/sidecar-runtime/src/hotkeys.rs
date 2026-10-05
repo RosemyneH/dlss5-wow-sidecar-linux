@@ -5,7 +5,10 @@ use std::sync::{Arc, Mutex};
 use tracing::warn;
 
 use crate::protocol::SidecarCommand;
-use crate::{is_running, read, send};
+use crate::send;
+
+#[cfg(feature = "hotkeys-evdev")]
+use crate::{is_running, read};
 
 #[cfg(feature = "hotkeys-evdev")]
 use tracing::info;
@@ -46,7 +49,18 @@ impl HotkeyBindings {
     }
 
     pub fn apply_evdev_default_policy(self) -> Self {
-        self
+        if cfg!(feature = "hotkeys-evdev-full") {
+            self
+        } else if cfg!(feature = "hotkeys-evdev") {
+            Self {
+                start_stop: None,
+                toggle_overlay: None,
+                toggle_hud: None,
+                panic_combo: self.panic_combo,
+            }
+        } else {
+            self
+        }
     }
 }
 
@@ -116,7 +130,6 @@ fn run_evdev(stop_flag: Arc<Mutex<bool>>, bindings: HotkeyBindings) -> anyhow::R
                 if combo_matches(panic, &pressed, code) {
                     info!("panic hotkey");
                     execute_panic();
-                    *stop_flag.lock().unwrap() = true;
                     continue;
                 }
                 if combo_matches_opt(toggle_overlay, &pressed, code) {
