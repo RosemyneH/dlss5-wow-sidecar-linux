@@ -1,0 +1,13 @@
+[package]
+name = "sidecar-overlay"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Transparent overlay window for presenting upscaled RGBA frames over WoW"
+
+[dependencies]
+sidecar-core = { path = "../sidecar-core" }
+softbuffer = "0.4"
+thiserror.workspace = true
+tracing.workspace = true
+winit = { version = "0.30", default-features = true, features = ["rwh_06", "x11", "wayland"] }
