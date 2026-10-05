@@ -15,6 +15,9 @@ use tracing::{info, warn};
 use crate::error::{enrich_portal_error, CaptureError};
 use crate::frame::CaptureFrame;
 use crate::hint::WindowHint;
+use crate::portal_restore::{
+    clear_screencast_restore_token, load_screencast_restore_token, save_screencast_restore_token,
+};
 
 pub struct PortalHandle {
     join: JoinHandle<()>,
@@ -114,6 +117,27 @@ pub fn spawn_direct_pipewire_stream(
 const MISSING_BACKEND: &str = "no ScreenCast implementation on the session bus — install/start xdg-desktop-portal plus the compositor backend (Hyprland: xdg-desktop-portal-hyprland, Sway/wlroots: xdg-desktop-portal-wlr, KDE: xdg-desktop-portal-kde, GNOME: xdg-desktop-portal-gnome); `wowsidecar-linux doctor` lists what is missing";
 
 async fn open_portal(hint: Option<&WindowHint>) -> Result<(PortalStream, OwnedFd), CaptureError> {
+    let saved = load_screencast_restore_token();
+    match open_portal_with_token(hint, saved.as_deref()).await {
+        Ok(pair) => Ok(pair),
+        Err(e) if saved.is_some() && restore_token_failure(&e) => {
+            warn!("screencast restore token rejected; clearing saved token and retrying picker");
+            clear_screencast_restore_token();
+            open_portal_with_token(hint, None).await
+        }
+        Err(e) => Err(e),
+    }
+}
+
+fn restore_token_failure(err: &CaptureError) -> bool {
+    let msg = err.to_string().to_ascii_lowercase();
+    msg.contains("restore") || msg.contains("invalid") || msg.contains("not allowed")
+}
+
+async fn open_portal_with_token(
+    hint: Option<&WindowHint>,
+    restore_token: Option<&str>,
+) -> Result<(PortalStream, OwnedFd), CaptureError> {
     let proxy = Screencast::new()
         .await
         .map_err(|e| portal_err("connect", &e))?;
@@ -135,8 +159,8 @@ async fn open_portal(hint: Option<&WindowHint>) -> Result<(PortalStream, OwnedFd
                 .set_cursor_mode(CursorMode::Metadata)
                 .set_sources(sources)
                 .set_multiple(false)
-                .set_restore_token(None)
-                .set_persist_mode(PersistMode::DoNot),
+                .set_restore_token(restore_token)
+                .set_persist_mode(PersistMode::ExplicitlyRevoked),
         )
         .await
         .map_err(|e| portal_err("select sources", &e))?;
@@ -147,6 +171,11 @@ async fn open_portal(hint: Option<&WindowHint>) -> Result<(PortalStream, OwnedFd
         .map_err(|e| portal_err("start", &e))?
         .response()
         .map_err(|e| portal_err("start", &e))?;
+
+    if let Some(token) = response.restore_token() {
+        save_screencast_restore_token(token);
+        info!("screencast restore token saved for next session (picker may be skipped)");
+    }
 
     let stream = pick_stream(response.streams(), hint)?;
 

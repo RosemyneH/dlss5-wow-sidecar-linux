@@ -4,6 +4,7 @@ mod frame;
 mod hint;
 mod mock;
 mod portal;
+mod portal_restore;
 mod pw_node;
 mod pw_record;
 mod stream;
