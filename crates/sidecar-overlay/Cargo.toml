@@ -5,9 +5,15 @@ edition.workspace = true
 license.workspace = true
 description = "Transparent overlay window for presenting upscaled RGBA frames over WoW"
 
+[features]
+default = []
+layer-shell = ["dep:smithay-client-toolkit", "dep:wayland-client"]
+
 [dependencies]
 sidecar-core = { path = "../sidecar-core" }
 softbuffer = "0.4"
 thiserror.workspace = true
 tracing.workspace = true
 winit = { version = "0.30", default-features = true, features = ["rwh_06", "x11", "wayland"] }
+smithay-client-toolkit = { version = "0.19", optional = true, default-features = false, features = ["calloop"] }
+wayland-client = { version = "0.31", optional = true }

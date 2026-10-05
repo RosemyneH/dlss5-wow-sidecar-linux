@@ -41,6 +41,9 @@ pub enum OverlayError {
     },
     #[error("overlay window is not ready yet; call pump() until resumed")]
     NotReady,
+    #[cfg(feature = "layer-shell")]
+    #[error("wayland layer-shell: {0}")]
+    LayerShell(String),
 }
 
 struct PendingFrame {
@@ -210,14 +213,13 @@ impl ApplicationHandler for OverlayApp {
     }
 }
 
-/// Transparent overlay sized to a [`DesktopWindow`] rect; blits RGBA via winit + softbuffer.
-pub struct OverlayPresenter {
+struct WinitOverlayPresenter {
     event_loop: EventLoop<()>,
     app: OverlayApp,
 }
 
-impl OverlayPresenter {
-    pub fn for_desktop_window(desktop: &DesktopWindow) -> Result<Self, OverlayError> {
+impl WinitOverlayPresenter {
+    fn for_desktop_window(desktop: &DesktopWindow) -> Result<Self, OverlayError> {
         let event_loop = EventLoop::new()?;
         let context =
             Context::new(event_loop.owned_display_handle()).map_err(OverlayError::Softbuffer)?;
@@ -227,8 +229,7 @@ impl OverlayPresenter {
         })
     }
 
-    /// Queue an RGBA patch at `(x,y)` with size `(w,h)` in overlay-local coordinates (origin = desktop window top-left).
-    pub fn show_frame(
+    fn show_frame(
         &mut self,
         rgba: &[u8],
         x: u32,
@@ -239,8 +240,7 @@ impl OverlayPresenter {
         self.app.queue_frame(rgba, x, y, w, h)
     }
 
-    /// Reposition/resize the overlay from a fresh `list_wow_windows()` poll (same `address` as at creation).
-    pub fn refresh_geometry(&mut self) -> GeometrySync {
+    fn refresh_geometry(&mut self) -> GeometrySync {
         let (sync, updated) = poll_tracked_wow_geometry(&self.app.desktop);
         if let Some(desktop) = updated {
             self.app.apply_desktop_geometry(desktop);
@@ -248,20 +248,18 @@ impl OverlayPresenter {
         sync
     }
 
-    /// Drive the winit loop once: poll WoW geometry, then pump events.
-    pub fn pump(&mut self, timeout: Option<Duration>) -> OverlayPumpOutcome {
+    fn pump(&mut self, timeout: Option<Duration>) -> OverlayPumpOutcome {
         self.refresh_geometry();
         OverlayPumpOutcome::from_pump_status(
             self.event_loop.pump_app_events(timeout, &mut self.app),
         )
     }
 
-    /// Lower-level pump without compositor geometry polling.
-    pub fn pump_events_only(&mut self, timeout: Option<Duration>) -> PumpStatus {
+    fn pump_events_only(&mut self, timeout: Option<Duration>) -> PumpStatus {
         self.event_loop.pump_app_events(timeout, &mut self.app)
     }
 
-    pub fn desktop_geometry(&self) -> (i32, i32, u32, u32) {
+    fn desktop_geometry(&self) -> (i32, i32, u32, u32) {
         (
             self.app.desktop.x,
             self.app.desktop.y,
@@ -270,9 +268,103 @@ impl OverlayPresenter {
         )
     }
 
-    pub fn set_visible(&mut self, visible: bool) {
+    fn set_visible(&mut self, visible: bool) {
         self.app.set_visible(visible);
     }
+}
+
+#[cfg(feature = "layer-shell")]
+use crate::layer_shell_presenter::LayerShellOverlayPresenter;
+
+enum OverlayBackend {
+    Winit(WinitOverlayPresenter),
+    #[cfg(feature = "layer-shell")]
+    LayerShell(LayerShellOverlayPresenter),
+}
+
+/// Transparent overlay sized to a [`DesktopWindow`] rect (winit + softbuffer by default).
+pub struct OverlayPresenter {
+    backend: OverlayBackend,
+}
+
+impl OverlayPresenter {
+    pub fn for_desktop_window(desktop: &DesktopWindow) -> Result<Self, OverlayError> {
+        #[cfg(feature = "layer-shell")]
+        if layer_shell_backend_requested() {
+            match LayerShellOverlayPresenter::for_desktop_window(desktop) {
+                Ok(p) => return Ok(Self { backend: OverlayBackend::LayerShell(p) }),
+                Err(e) => warn!("layer-shell overlay unavailable, using winit: {e}"),
+            }
+        }
+        Ok(Self {
+            backend: OverlayBackend::Winit(WinitOverlayPresenter::for_desktop_window(desktop)?),
+        })
+    }
+
+    pub fn show_frame(
+        &mut self,
+        rgba: &[u8],
+        x: u32,
+        y: u32,
+        w: u32,
+        h: u32,
+    ) -> Result<(), OverlayError> {
+        match &mut self.backend {
+            OverlayBackend::Winit(p) => p.show_frame(rgba, x, y, w, h),
+            #[cfg(feature = "layer-shell")]
+            OverlayBackend::LayerShell(p) => p.show_frame(rgba, x, y, w, h),
+        }
+    }
+
+    pub fn refresh_geometry(&mut self) -> GeometrySync {
+        match &mut self.backend {
+            OverlayBackend::Winit(p) => p.refresh_geometry(),
+            #[cfg(feature = "layer-shell")]
+            OverlayBackend::LayerShell(p) => p.refresh_geometry(),
+        }
+    }
+
+    pub fn pump(&mut self, timeout: Option<Duration>) -> OverlayPumpOutcome {
+        match &mut self.backend {
+            OverlayBackend::Winit(p) => p.pump(timeout),
+            #[cfg(feature = "layer-shell")]
+            OverlayBackend::LayerShell(p) => p.pump(timeout),
+        }
+    }
+
+    pub fn pump_events_only(&mut self, timeout: Option<Duration>) -> PumpStatus {
+        match &mut self.backend {
+            OverlayBackend::Winit(p) => p.pump_events_only(timeout),
+            #[cfg(feature = "layer-shell")]
+            OverlayBackend::LayerShell(p) => p.pump_events_only(timeout),
+        }
+    }
+
+    pub fn desktop_geometry(&self) -> (i32, i32, u32, u32) {
+        match &self.backend {
+            OverlayBackend::Winit(p) => p.desktop_geometry(),
+            #[cfg(feature = "layer-shell")]
+            OverlayBackend::LayerShell(p) => p.desktop_geometry(),
+        }
+    }
+
+    pub fn set_visible(&mut self, visible: bool) {
+        match &mut self.backend {
+            OverlayBackend::Winit(p) => p.set_visible(visible),
+            #[cfg(feature = "layer-shell")]
+            OverlayBackend::LayerShell(p) => p.set_visible(visible),
+        }
+    }
+}
+
+#[cfg(feature = "layer-shell")]
+fn layer_shell_backend_requested() -> bool {
+    std::env::var("WOW_SIDECAR_OVERLAY_BACKEND")
+        .map(|v| {
+            let v = v.to_ascii_lowercase();
+            v == "layer-shell" || v == "layer_shell"
+        })
+        .unwrap_or(false)
 }
 
 fn apply_window_chrome(window: &Window, desktop: &DesktopWindow) {
@@ -287,7 +379,7 @@ fn apply_window_chrome(window: &Window, desktop: &DesktopWindow) {
     }
 }
 
-fn validate_frame_blit(
+pub(crate) fn validate_frame_blit(
     ow: u32,
     oh: u32,
     rgba: &[u8],

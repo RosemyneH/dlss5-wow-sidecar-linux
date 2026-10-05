@@ -1,4 +1,6 @@
 mod geometry;
+#[cfg(feature = "layer-shell")]
+mod layer_shell_presenter;
 mod presenter;
 mod pump;
 
