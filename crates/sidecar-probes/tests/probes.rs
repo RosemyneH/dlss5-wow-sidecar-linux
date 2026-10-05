@@ -54,6 +54,13 @@ fn injector_scan_on_disk() {
 }
 
 #[test]
+fn gpu_memory_csv_parses() {
+    if let Some(mem) = sidecar_probes::query_gpu_memory() {
+        assert!(mem.total_mb >= mem.used_mb);
+    }
+}
+
+#[test]
 fn gpu_arch_from_marketing_name() {
     assert_eq!(
         architecture_from_name("NVIDIA GeForce RTX 4090"),

@@ -5,7 +5,12 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MAX_ROUNDS="${1:-10}"
 
 open_p06_p16() {
-  rg '\| (todo|partial) \|' "$ROOT/docs/PARITY.md" | rg 'P(0[6-9]|1[0-6])' || true
+  rg '^\| P(0[6-9]|1[0-6]) ' "$ROOT/docs/PARITY.md" | while IFS= read -r line; do
+    linux="$(echo "$line" | awk -F'|' '{gsub(/^ +| +$/,"",$5); print $5}')"
+    if [[ "$linux" != yes ]]; then
+      echo "$line"
+    fi
+  done
 }
 
 for round in $(seq 1 "$MAX_ROUNDS"); do

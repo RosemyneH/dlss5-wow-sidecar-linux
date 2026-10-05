@@ -5,7 +5,6 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use sidecar_capture::{start_capture, wow_window_hint};
 use sidecar_config::{matching_preset, parse_config, PRESETS};
-use sidecar_neural::{build_processor_from_config, processor_id_for_config};
 use sidecar_core::{list_wow_windows, smart_scan_installs, SmartScanOptions};
 use sidecar_runtime::{control_socket_path, is_running, read, send, SidecarCommand};
 use tracing_subscriber::EnvFilter;
@@ -41,6 +40,8 @@ enum Commands {
     },
     /// Run overlay daemon in this process (same as `wowsidecar-daemon`)
     Run,
+    /// Foreground daemon for daily use (same as `run`; see README user flow)
+    Serve,
     /// Spawn `wowsidecar-daemon` if not running
     Start,
     /// Tell daemon to stop
@@ -126,15 +127,7 @@ fn main() -> Result<()> {
                 "\nconfig: preset={} neural_passes={} (1x=1, 2x=2, 3x=3 passes)",
                 preset_name, cfg.neural_passes
             );
-            println!(
-                "neural processor: {} (neural_pass={})",
-                processor_id_for_config(&cfg),
-                cfg.neural_pass
-            );
-            match build_processor_from_config(&cfg) {
-                Ok(_) => println!("neural backend: ready"),
-                Err(e) => println!("neural backend: {}", e),
-            }
+            println!("neural pass runtime: not implemented yet (see docs/ROADMAP.md)");
             println!("capture: docs/CAPTURE.md (`wowsidecar-linux capture-test`)");
             println!(
                 "runtime ipc: {} ({})",
@@ -150,6 +143,14 @@ fn main() -> Result<()> {
             run_capture_test(frames, any_window)?;
         }
         Commands::Run => sidecar_runtime::run_daemon()?,
+        Commands::Serve => {
+            eprintln!(
+                "wowsidecar-linux serve: control socket {}",
+                control_socket_path().display()
+            );
+            eprintln!("stop with: wowsidecar-linux stop (or Ctrl+C in this terminal)");
+            sidecar_runtime::run_daemon()?
+        }
         Commands::Stop => {
             if send(SidecarCommand::Stop) {
                 println!("stop sent");

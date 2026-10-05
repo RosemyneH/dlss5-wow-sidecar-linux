@@ -1,0 +1,17 @@
+[package]
+name = "wowsidecar-pipeline-tests"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+path = "lib.rs"
+
+[[test]]
+name = "pipeline_mock"
+path = "pipeline_mock.rs"
+
+[dependencies]
+sidecar-capture = { path = "../crates/sidecar-capture" }
+sidecar-neural = { path = "../crates/sidecar-neural" }

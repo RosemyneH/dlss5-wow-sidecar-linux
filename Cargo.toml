@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "tests",
     "crates/sidecar-config",
     "crates/sidecar-core",
     "crates/sidecar-cli",

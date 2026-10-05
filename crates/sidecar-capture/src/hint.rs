@@ -204,7 +204,10 @@ fn looks_like_hyprland_address(s: &str) -> bool {
 
 pub fn pick_wow_hint(windows: &[DesktopWindow]) -> Option<WindowHint> {
     if let Some(parsed) = parse_capture_hint_from_env() {
-        if let Some(w) = windows.iter().find(|w| desktop_window_matches_parsed(w, &parsed)) {
+        if let Some(w) = windows
+            .iter()
+            .find(|w| desktop_window_matches_parsed(w, &parsed))
+        {
             return Some(WindowHint::from(w));
         }
         if !parsed.address.is_empty() || !parsed.title.is_empty() || !parsed.class.is_empty() {
@@ -225,9 +228,7 @@ pub fn pick_wow_hint(windows: &[DesktopWindow]) -> Option<WindowHint> {
 }
 
 fn desktop_window_matches_parsed(w: &DesktopWindow, parsed: &WindowHint) -> bool {
-    if !parsed.compositor.is_empty()
-        && !w.compositor.eq_ignore_ascii_case(&parsed.compositor)
-    {
+    if !parsed.compositor.is_empty() && !w.compositor.eq_ignore_ascii_case(&parsed.compositor) {
         return false;
     }
     if !parsed.address.is_empty() {
@@ -313,7 +314,7 @@ mod tests {
 
     #[test]
     fn pick_wow_hint_prefers_address_override() {
-        let windows = vec![DesktopWindow {
+        let windows = [DesktopWindow {
             compositor: "hyprland".into(),
             address: "0xaaaa".into(),
             title: "WoW A".into(),
